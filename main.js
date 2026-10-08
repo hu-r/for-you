@@ -442,6 +442,21 @@ function bindHold(button, { duration, onDone, blows }) {
     holding = false;
   };
 
+  let touchHeld = false;
+  button.addEventListener("touchstart", (event) => {
+    if (blocked()) return;
+    event.preventDefault();
+    touchHeld = true;
+    begin();
+  }, { passive: false });
+  button.addEventListener("touchend", () => {
+    touchHeld = false;
+    stop();
+  });
+  button.addEventListener("touchcancel", () => {
+    touchHeld = false;
+    stop();
+  });
   button.addEventListener("pointerdown", (event) => {
     if (blocked()) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
@@ -454,7 +469,11 @@ function bindHold(button, { duration, onDone, blows }) {
     begin();
   });
   button.addEventListener("pointerup", stop);
-  button.addEventListener("pointercancel", stop);
+  button.addEventListener("pointercancel", () => {
+    if (touchHeld) return;
+    stop();
+  });
+  button.addEventListener("selectstart", (event) => event.preventDefault());
   button.addEventListener("keydown", (event) => {
     if (event.repeat || blocked()) return;
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -1156,7 +1175,7 @@ function armMic() {
   if (micState === "on" || micState === "asking" || !navigator.mediaDevices?.getUserMedia) return;
   micState = "asking";
   const attempts = [
-    { audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } },
+    { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } },
     { audio: true },
   ];
   const ask = (index) => {
@@ -1208,14 +1227,14 @@ function watchBlow(stream) {
       requestAnimationFrame(watch);
       return;
     }
-    const loud = rms > 0.12 && rms - ambient > 0.07 && rms > ambient * 2.6;
+    const loud = rms > 0.045 && rms - ambient > 0.02 && rms > ambient * 1.55;
     if (!loud) ambient = ambient * 0.985 + rms * 0.015;
     hot = loud ? hot + 1 : 0;
     const opening = lit && !body.classList.contains("is-show") && !body.classList.contains("is-bridge") && !body.classList.contains("is-finale");
-    const lean = loud ? Math.min(1, (rms - ambient) / 0.32) : 0;
+    const lean = loud ? Math.min(1, (rms - ambient) / 0.16) : 0;
     if (opening) light.style.setProperty("--blow", lean.toFixed(3));
     if (body.classList.contains("is-finale")) quench.style.setProperty("--blow", lean.toFixed(3));
-    if (hot >= 7 && (opening || body.classList.contains("is-finale"))) {
+    if (hot >= 4 && (opening || body.classList.contains("is-finale"))) {
       extinguish();
       return;
     }
@@ -1552,6 +1571,11 @@ function readFile(file) {
     reader.readAsDataURL(file);
   });
 }
+
+document.addEventListener("selectstart", (event) => {
+  if (event.target instanceof Element && event.target.closest(".editor")) return;
+  event.preventDefault();
+});
 
 document.getElementById("watch-pace").addEventListener("input", (event) => {
   showPace(1.5 - Number(event.target.value) / 10);

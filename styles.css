@@ -25,6 +25,17 @@ body {
   font-family: "Songti SC", "Noto Serif SC", "STSong", PMingLiU, serif;
   background: var(--night);
   text-rendering: optimizeLegibility;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.editor,
+.editor input,
+.editor textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 .sky,
@@ -128,6 +139,8 @@ body.is-out .gate {
   cursor: pointer;
   appearance: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
   touch-action: none;
   user-select: none;
 }

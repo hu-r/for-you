@@ -594,7 +594,7 @@ function bindOrientation(img, box) {
 
 function frameHtml(photo) {
   const tone = photo.src ? "has-photo" : photo.tone || "";
-  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" />` : "";
+  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" decoding="async" />` : "";
   const line = copyHtml(photo.text);
   const words = line ? `<figcaption class="copy">${line}</figcaption>` : "";
   return `<figure class="frame"><div class="shot ${tone}">${image}<span class="label">照片位</span><span class="wash"></span></div>${words}</figure>`;
@@ -805,6 +805,30 @@ function afterPaint() {
   });
 }
 
+function whenShown(root) {
+  const images = [...root.querySelectorAll(".shot.has-photo img")];
+  return Promise.all(images.map((img) => {
+    if (img.complete && img.naturalWidth) return Promise.resolve();
+    return Promise.race([
+      new Promise((resolve) => {
+        img.addEventListener("load", resolve, { once: true });
+        img.addEventListener("error", resolve, { once: true });
+      }),
+      new Promise((resolve) => window.setTimeout(resolve, 1500)),
+    ]);
+  }));
+}
+
+function peekNext(index, slot) {
+  const page = pages[index];
+  const photo = page?.photos[slot + 1] || pages[index + 1]?.photos?.[0];
+  const src = photo?.src;
+  if (!src) return;
+  const img = new Image();
+  img.decoding = "async";
+  img.src = src;
+}
+
 async function present(index, fromEnd) {
   cursor = index;
   const page = pages[index];
@@ -815,13 +839,15 @@ async function present(index, fromEnd) {
 async function presentGroup(page, index) {
   move = null;
   showSlide(page, index);
+  await whenShown(stage);
   await afterPaint();
   if (move) return move;
   body.classList.remove("is-dim");
   stage.classList.add("is-in");
   if (move) return move;
-  if (await hold(motion(320))) return move || "next";
+  if (await hold(motion(900))) return move || "next";
   stage.classList.add("has-words");
+  peekNext(index, 0);
   if (move) return move;
   const words = `${page.text || ""}${page.photos.map((photo) => photo.text || "").join("")}`;
   if (await hold(readMs(words), true)) return move || "next";
@@ -837,6 +863,7 @@ async function presentReel(page, index, fromEnd) {
   let slot = fromEnd ? page.photos.length - 1 : 0;
   move = null;
   showSlide(page, index, slot);
+  await whenShown(stage);
   await afterPaint();
   body.classList.remove("is-dim");
   stage.classList.add("is-in");
@@ -844,9 +871,10 @@ async function presentReel(page, index, fromEnd) {
   while (!out) {
     if (!move) {
       if (!opened) {
-        if (!(await hold(motion(320))) && !move) stage.classList.add("has-words");
+        if (!(await hold(motion(900))) && !move) stage.classList.add("has-words");
         opened = true;
       }
+      peekNext(index, slot);
       if (!move) {
         const words = `${slot === 0 ? page.text || "" : ""}${page.photos[slot].text || ""}`;
         await hold(readMs(words), true);
@@ -892,6 +920,7 @@ async function glidePhoto(page, slot) {
     reelMark.textContent = `${slot + 1} / ${page.photos.length}`;
     skipHint.textContent = reelHint(slot, page.photos.length);
     stage.classList.add("has-words");
+    await whenShown(frame);
     await afterPaint();
     frame.classList.remove("is-arrive");
     await hold(motion(500));

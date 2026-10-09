@@ -125,6 +125,7 @@ let showing = false;
 let scene = "gate";
 let wishArmed = false;
 let move = null;
+let jumpTo = null;
 let cursor = 0;
 let skipWait = null;
 let blowTimer = 0;
@@ -338,13 +339,50 @@ function rampVolume(audio, target, ms) {
   requestAnimationFrame(tick);
 }
 
-function primeSong() {
-  if (script.music !== "file" || !script.musicSrc) return;
-  song = new Audio(script.musicSrc);
-  song.loop = true;
-  song.volume = 0;
-  const pending = song.play();
-  if (pending) pending.catch(() => {});
+let songReady = false;
+
+function ensureSong() {
+  if (script.music !== "file" || !script.musicSrc) return null;
+  if (song && song.dataset.src !== script.musicSrc) {
+    song.pause();
+    song = null;
+    songReady = false;
+  }
+  if (!song) {
+    song = new Audio();
+    song.loop = true;
+    song.preload = "auto";
+    song.playsInline = true;
+    song.setAttribute("playsinline", "");
+    song.setAttribute("webkit-playsinline", "");
+    song.volume = 0;
+    song.src = script.musicSrc;
+    song.dataset.src = script.musicSrc;
+  }
+  return song;
+}
+
+function prepareSong() {
+  const audio = ensureSong();
+  if (!audio || musicOn || songReady) return;
+  songReady = true;
+  audio.muted = true;
+  audio.volume = 0;
+  const pending = audio.play();
+  const park = () => {
+    if (musicOn) return;
+    audio.pause();
+    try {
+      audio.currentTime = 0;
+    } catch {
+      /* 还没开始 */
+    }
+  };
+  if (pending && typeof pending.then === "function") {
+    pending.then(park).catch(() => {
+      songReady = false;
+    });
+  } else park();
 }
 
 let previewing = false;
@@ -365,10 +403,22 @@ function startMusic() {
   if (musicOn) return;
   if (script.music === "off") return;
   if (script.music === "file" && script.musicSrc) {
-    if (!song) primeSong();
-    if (!song) return;
+    const audio = ensureSong();
+    if (!audio) return;
     musicOn = true;
-    rampVolume(song, 0.5, 1800);
+    audio.muted = false;
+    audio.volume = 0;
+    const fade = () => rampVolume(audio, 0.5, 2800);
+    if (!audio.paused) {
+      fade();
+      return;
+    }
+    const pending = audio.play();
+    if (pending && typeof pending.then === "function") {
+      pending.then(fade).catch(() => {
+        musicOn = false;
+      });
+    } else fade();
     return;
   }
   unlockAudio();
@@ -428,10 +478,9 @@ function bindHold(button, { duration, onDone, blows }) {
   const begin = () => {
     if (button === light) {
       unlockAudio();
-      primeSong();
-      armMic();
+      prepareSong();
     }
-    if (button === quench) armMic();
+    if (button === quench && body.classList.contains("is-blow-cue")) armMic();
     holding = true;
     last = 0;
     cancelAnimationFrame(frame);
@@ -646,6 +695,13 @@ function showPace(factor) {
   pacedWait?.retune();
 }
 
+function requestJump(index) {
+  if (!lit || out || !showing || body.classList.contains("is-editing")) return;
+  const last = Math.max(0, pages.length - 1);
+  jumpTo = Math.max(0, Math.min(last, index));
+  skipWait?.();
+}
+
 function nudge(direction) {
   if (!lit || out || body.classList.contains("is-editing")) return;
   if (direction === "back" && scene === "candle") return;
@@ -712,7 +768,6 @@ function enterFinale() {
   requestAnimationFrame(() => body.classList.add("is-finale"));
   if (!wishArmed) {
     wishArmed = true;
-    armMicIfGranted();
     window.clearTimeout(blowTimer);
     blowTimer = window.setTimeout(() => {
       if (!out && scene === "finale") body.classList.add("is-blow-cue");
@@ -746,6 +801,12 @@ async function play() {
       const direction = await present(index, fromEnd);
       fromEnd = false;
       if (out) return;
+      if (jumpTo != null) {
+        index = jumpTo;
+        jumpTo = null;
+        move = null;
+        continue;
+      }
       if (direction === "back") {
         if (index === 0) phase = "bridge";
         else {
@@ -783,24 +844,32 @@ async function present(index, fromEnd) {
   return presentGroup(page, index);
 }
 
+function jumped() {
+  return jumpTo != null;
+}
+
 async function presentGroup(page, index) {
   move = null;
   showSlide(page, index);
   await afterPaint();
+  if (jumped()) return "jump";
   if (move) return move;
   body.classList.remove("is-dim");
   stage.classList.add("is-in");
+  if (jumped()) return "jump";
   if (move) return move;
-  if (await hold(motion(320))) return move || "next";
+  if (await hold(motion(320))) return jumped() ? "jump" : move || "next";
   stage.classList.add("has-words");
+  if (jumped()) return "jump";
   if (move) return move;
   const words = `${page.text || ""}${page.photos.map((photo) => photo.text || "").join("")}`;
-  if (await hold(readMs(words), true)) return move || "next";
+  if (await hold(readMs(words), true)) return jumped() ? "jump" : move || "next";
   stage.classList.remove("is-in", "has-words");
   stage.classList.add("is-leaving");
   body.classList.add("is-dim");
+  if (jumped()) return "jump";
   if (move) return move;
-  if (await hold(motion(500))) return move || "next";
+  if (await hold(motion(500))) return jumped() ? "jump" : move || "next";
   return "next";
 }
 
@@ -813,16 +882,19 @@ async function presentReel(page, index, fromEnd) {
   stage.classList.add("is-in");
   let opened = false;
   while (!out) {
+    if (jumped()) return "jump";
     if (!move) {
       if (!opened) {
-        if (!(await hold(motion(320))) && !move) stage.classList.add("has-words");
+        if (!(await hold(motion(320))) && !move && !jumped()) stage.classList.add("has-words");
         opened = true;
       }
+      if (jumped()) return "jump";
       if (!move) {
         const words = `${slot === 0 ? page.text || "" : ""}${page.photos[slot].text || ""}`;
         await hold(readMs(words), true);
       }
     }
+    if (jumped()) return "jump";
     if (out) return "next";
     const goingBack = move === "back";
     move = null;
@@ -831,11 +903,12 @@ async function presentReel(page, index, fromEnd) {
       stage.classList.remove("is-in", "has-words");
       stage.classList.add("is-leaving");
       body.classList.add("is-dim");
-      if (await hold(motion(500))) return move || (goingBack ? "back" : "next");
+      if (await hold(motion(500))) return jumped() ? "jump" : move || (goingBack ? "back" : "next");
       return goingBack ? "back" : "next";
     }
     slot += goingBack ? -1 : 1;
     await glidePhoto(page, slot);
+    if (jumped()) return "jump";
   }
   return "next";
 }
@@ -879,10 +952,11 @@ async function glidePhoto(page, slot) {
 let gesture = null;
 
 function navBlocked(event) {
-  return body.classList.contains("is-editing") || event.target.closest(".candle, .editor, .edit-entry, .pace-dock, .shot, .copy");
+  return body.classList.contains("is-editing") || event.target.closest(".candle, .editor, .edit-entry, .pace-dock, .corner, .shot, .copy");
 }
 
 window.addEventListener("pointerdown", (event) => {
+  if (!out && body.classList.contains("is-finale") && body.classList.contains("is-blow-cue")) armMic();
   if (!lit || out || navBlocked(event)) return;
   gesture = { x: event.clientX, y: event.clientY, id: event.pointerId };
 });
@@ -911,6 +985,16 @@ window.addEventListener("keydown", (event) => {
   if (event.target instanceof Element && event.target.closest(".editor")) return;
   if (event.key === "ArrowRight") nudge("next");
   if (event.key === "ArrowLeft") nudge("back");
+});
+
+document.getElementById("jump-first").addEventListener("click", (event) => {
+  event.stopPropagation();
+  requestJump(0);
+});
+
+document.getElementById("jump-last").addEventListener("click", (event) => {
+  event.stopPropagation();
+  requestJump(pages.length - 1);
 });
 
 const bursts = [];
@@ -1143,6 +1227,17 @@ window.addEventListener("resize", () => {
   if (showFireworks) fitFireworks();
 });
 
+window.addEventListener("pageshow", () => {
+  if (!musicOn && song) {
+    song.pause();
+    try {
+      song.currentTime = 0;
+    } catch {
+      /* 还没开始 */
+    }
+  }
+});
+
 function burst(button) {
   for (let index = 0; index < 8; index += 1) {
     const spark = document.createElement("i");
@@ -1157,19 +1252,6 @@ function burst(button) {
 
 let micState = "idle";
 let micStream = null;
-
-function armMicIfGranted() {
-  const permissions = navigator.permissions;
-  if (!permissions?.query) return;
-  permissions
-    .query({ name: "microphone" })
-    .then((status) => {
-      if (status.state === "granted") armMic();
-    })
-    .catch(() => {
-      /* 等他按住火苗时再问 */
-    });
-}
 
 function armMic() {
   if (micState === "on" || micState === "asking" || !navigator.mediaDevices?.getUserMedia) return;
@@ -1186,9 +1268,10 @@ function armMic() {
         micStream = stream;
         watchBlow(stream);
       })
-      .catch(() => {
+      .catch((error) => {
         if (index + 1 < attempts.length) ask(index + 1);
-        else micState = "denied";
+        else if (error?.name === "NotFoundError" || error?.name === "NotReadableError") micState = "denied";
+        else micState = "idle";
       });
   };
   ask(0);
@@ -1227,14 +1310,17 @@ function watchBlow(stream) {
       requestAnimationFrame(watch);
       return;
     }
-    const loud = rms > 0.045 && rms - ambient > 0.02 && rms > ambient * 1.55;
+    if (!body.classList.contains("is-finale")) {
+      hot = 0;
+      requestAnimationFrame(watch);
+      return;
+    }
+    const loud = rms > 0.018 && rms - ambient > 0.006 && rms > ambient * 1.2;
     if (!loud) ambient = ambient * 0.985 + rms * 0.015;
     hot = loud ? hot + 1 : 0;
-    const opening = lit && !body.classList.contains("is-show") && !body.classList.contains("is-bridge") && !body.classList.contains("is-finale");
-    const lean = loud ? Math.min(1, (rms - ambient) / 0.16) : 0;
-    if (opening) light.style.setProperty("--blow", lean.toFixed(3));
-    if (body.classList.contains("is-finale")) quench.style.setProperty("--blow", lean.toFixed(3));
-    if (hot >= 4 && (opening || body.classList.contains("is-finale"))) {
+    const lean = loud ? Math.min(1, (rms - ambient) / 0.08) : 0;
+    quench.style.setProperty("--blow", lean.toFixed(3));
+    if (hot >= 3) {
       extinguish();
       return;
     }
@@ -1254,7 +1340,6 @@ function extinguish() {
   candle.classList.add("dying");
   if (fromOpening) candle.style.setProperty("--blow", "1");
   burst(candle);
-  swellMusic();
   startFireworks();
   micStream?.getTracks().forEach((track) => track.stop());
   window.setTimeout(() => {
@@ -1262,10 +1347,6 @@ function extinguish() {
     body.classList.add("is-finale", "is-out");
   }, 420);
 }
-
-finale.addEventListener("pointerdown", () => {
-  if (!out) armMic();
-});
 
 bindHold(light, { duration: 1100, onDone: catchFlame });
 bindHold(quench, { duration: 900, onDone: extinguish, blows: true });

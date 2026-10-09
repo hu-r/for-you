@@ -118,18 +118,11 @@ function buildWall() {
 }
 
 function wakeWall() {
-  const imgs = [...wall.querySelectorAll("img[data-src]")].filter((img) => !img.getAttribute("src"));
-  let index = 0;
-  const step = () => {
-    imgs.slice(index, index + 4).forEach((img) => {
-      img.decoding = "async";
-      img.src = img.dataset.src;
-      bindOrientation(img, img.closest(".print"));
-    });
-    index += 4;
-    if (index < imgs.length) window.setTimeout(step, 180);
-  };
-  if (imgs.length) step();
+  wall.querySelectorAll("img[data-src]").forEach((img) => {
+    if (img.getAttribute("src")) return;
+    img.src = img.dataset.src;
+    bindOrientation(img, img.closest(".print"));
+  });
 }
 
 buildWall();
@@ -353,25 +346,11 @@ function rampVolume(audio, target, ms) {
   requestAnimationFrame(tick);
 }
 
-function prepareSong() {
-  const node = document.getElementById("song");
-  if (!node || script.music !== "file" || !script.musicSrc) {
-    allowPhotos();
-    return;
-  }
-  song = node;
-  if (node.getAttribute("src") === script.musicSrc) return;
-  node.preload = "auto";
-  node.loop = true;
-  node.volume = 0;
-  node.src = script.musicSrc;
-  node.addEventListener("canplay", allowPhotos, { once: true });
-  window.setTimeout(allowPhotos, 5000);
-}
-
 function primeSong() {
-  prepareSong();
-  if (!song) return;
+  if (script.music !== "file" || !script.musicSrc) return;
+  song = new Audio(script.musicSrc);
+  song.loop = true;
+  song.volume = 0;
   const pending = song.play();
   if (pending) pending.catch(() => {});
 }
@@ -596,7 +575,7 @@ function bindOrientation(img, box) {
 
 function frameHtml(photo) {
   const tone = photo.src ? "has-photo" : photo.tone || "";
-  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" decoding="async" />` : "";
+  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" />` : "";
   const line = copyHtml(photo.text);
   const words = line ? `<figcaption class="copy">${line}</figcaption>` : "";
   return `<figure class="frame"><div class="shot ${tone}">${image}<span class="label">照片位</span><span class="wash"></span></div>${words}</figure>`;
@@ -708,6 +687,7 @@ async function candleBeat() {
 }
 
 async function bridgeBeat() {
+  (pages[0]?.photos || []).slice(0, 3).forEach(warmPhoto);
   scene = "bridge";
   skipHint.textContent = pageHint;
   showing = false;
@@ -808,23 +788,14 @@ function afterPaint() {
 }
 
 const warmed = new Set();
-const preloadQueue = [];
-let preloadBusy = false;
-let preloadHold = 0;
-let photosMayLoad = false;
-
-function allowPhotos() {
-  if (photosMayLoad) return;
-  photosMayLoad = true;
-  pumpPreload();
-}
 
 function warmPhoto(photo) {
   const src = photo?.src;
   if (!src || warmed.has(src)) return;
   warmed.add(src);
-  preloadQueue.push(src);
-  pumpPreload();
+  const img = new Image();
+  img.decoding = "async";
+  img.src = src;
 }
 
 function warmAhead(index, slot) {
@@ -833,31 +804,21 @@ function warmAhead(index, slot) {
   warmPhoto(page.photos[slot + 1] || pages[index + 1]?.photos?.[0]);
 }
 
-function warmShow() {
-  pages.forEach((page) => (page.photos || []).forEach(warmPhoto));
-}
-
-let yieldedMusic = false;
-
-function pumpPreload() {
-  if (!photosMayLoad || preloadBusy || preloadHold || !preloadQueue.length) return;
-  if (!yieldedMusic && song && script.music === "file" && song.readyState < 3) {
-    yieldedMusic = true;
-    song.addEventListener("canplay", pumpPreload, { once: true });
-    window.setTimeout(pumpPreload, 2500);
-    return;
-  }
-  preloadBusy = true;
-  const src = preloadQueue.shift();
-  const img = new Image();
-  img.decoding = "async";
-  const next = () => {
-    preloadBusy = false;
-    window.setTimeout(pumpPreload, 60);
-  };
-  img.onload = next;
-  img.onerror = next;
-  img.src = src;
+function readyPhotos(root) {
+  const images = [...root.querySelectorAll(".shot.has-photo img")];
+  return Promise.all(images.map((img) => {
+    if (img.complete && img.naturalWidth) return Promise.resolve();
+    const done = typeof img.decode === "function"
+      ? img.decode().catch(() => {})
+      : new Promise((resolve) => {
+          img.addEventListener("load", resolve, { once: true });
+          img.addEventListener("error", resolve, { once: true });
+        });
+    return Promise.race([
+      done,
+      new Promise((resolve) => window.setTimeout(resolve, 700)),
+    ]);
+  }));
 }
 
 async function present(index, fromEnd) {
@@ -870,79 +831,62 @@ async function present(index, fromEnd) {
 async function presentGroup(page, index) {
   move = null;
   showSlide(page, index);
-  preloadHold += 1;
-  try {
-    await afterPaint();
-    if (move) return move;
-    body.classList.remove("is-dim");
-    stage.classList.add("is-in");
-    if (move) return move;
-    if (await hold(motion(320))) return move || "next";
-    preloadHold = Math.max(0, preloadHold - 1);
-    warmAhead(index, 0);
-    pumpPreload();
-    stage.classList.add("has-words");
-    if (move) return move;
-    const words = `${page.text || ""}${page.photos.map((photo) => photo.text || "").join("")}`;
-    if (await hold(readMs(words), true)) return move || "next";
-    preloadHold += 1;
-    stage.classList.remove("is-in", "has-words");
-    stage.classList.add("is-leaving");
-    body.classList.add("is-dim");
-    if (move) return move;
-    if (await hold(motion(500))) return move || "next";
-    return "next";
-  } finally {
-    preloadHold = 0;
-    pumpPreload();
-  }
+  warmAhead(index, 0);
+  await readyPhotos(stage);
+  await afterPaint();
+  if (move) return move;
+  body.classList.remove("is-dim");
+  stage.classList.add("is-in");
+  if (move) return move;
+  if (await hold(motion(320))) return move || "next";
+  stage.classList.add("has-words");
+  if (move) return move;
+  const words = `${page.text || ""}${page.photos.map((photo) => photo.text || "").join("")}`;
+  if (await hold(readMs(words), true)) return move || "next";
+  stage.classList.remove("is-in", "has-words");
+  stage.classList.add("is-leaving");
+  body.classList.add("is-dim");
+  if (move) return move;
+  if (await hold(motion(500))) return move || "next";
+  return "next";
 }
 
 async function presentReel(page, index, fromEnd) {
   let slot = fromEnd ? page.photos.length - 1 : 0;
   move = null;
   showSlide(page, index, slot);
-  preloadHold += 1;
-  try {
-    await afterPaint();
-    body.classList.remove("is-dim");
-    stage.classList.add("is-in");
-    let opened = false;
-    while (!out) {
+  warmAhead(index, slot);
+  await readyPhotos(stage);
+  await afterPaint();
+  body.classList.remove("is-dim");
+  stage.classList.add("is-in");
+  let opened = false;
+  while (!out) {
+    if (!move) {
+      if (!opened) {
+        if (!(await hold(motion(320))) && !move) stage.classList.add("has-words");
+        opened = true;
+      }
       if (!move) {
-        if (!opened) {
-          if (!(await hold(motion(320))) && !move) stage.classList.add("has-words");
-          opened = true;
-        }
-        preloadHold = 0;
-        warmAhead(index, slot);
-        pumpPreload();
-        if (!move) {
-          const words = `${slot === 0 ? page.text || "" : ""}${page.photos[slot].text || ""}`;
-          await hold(readMs(words), true);
-        }
+        const words = `${slot === 0 ? page.text || "" : ""}${page.photos[slot].text || ""}`;
+        await hold(readMs(words), true);
       }
-      if (out) return "next";
-      const goingBack = move === "back";
-      move = null;
-      const leaving = goingBack ? slot === 0 : slot === page.photos.length - 1;
-      if (leaving) {
-        preloadHold += 1;
-        stage.classList.remove("is-in", "has-words");
-        stage.classList.add("is-leaving");
-        body.classList.add("is-dim");
-        if (await hold(motion(500))) return move || (goingBack ? "back" : "next");
-        return goingBack ? "back" : "next";
-      }
-      slot += goingBack ? -1 : 1;
-      preloadHold += 1;
-      await glidePhoto(page, slot);
     }
-    return "next";
-  } finally {
-    preloadHold = 0;
-    pumpPreload();
+    if (out) return "next";
+    const goingBack = move === "back";
+    move = null;
+    const leaving = goingBack ? slot === 0 : slot === page.photos.length - 1;
+    if (leaving) {
+      stage.classList.remove("is-in", "has-words");
+      stage.classList.add("is-leaving");
+      body.classList.add("is-dim");
+      if (await hold(motion(500))) return move || (goingBack ? "back" : "next");
+      return goingBack ? "back" : "next";
+    }
+    slot += goingBack ? -1 : 1;
+    await glidePhoto(page, slot);
   }
+  return "next";
 }
 
 async function glidePhoto(page, slot) {
@@ -968,6 +912,8 @@ async function glidePhoto(page, slot) {
     reelMark.textContent = `${slot + 1} / ${page.photos.length}`;
     skipHint.textContent = reelHint(slot, page.photos.length);
     stage.classList.add("has-words");
+    warmAhead(cursor, slot);
+    await readyPhotos(frame);
     await afterPaint();
     frame.classList.remove("is-arrive");
     await hold(motion(500));
@@ -1759,10 +1705,6 @@ function applyAlbum(data) {
   settlePages(pages);
   if (data.script) takeScript(data.script);
   buildWall();
-  warmed.clear();
-  preloadQueue.length = 0;
-  warmShow();
-  prepareSong();
 }
 
 async function loadContent() {

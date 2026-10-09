@@ -19,16 +19,6 @@ body {
   height: 100%;
 }
 
-#bgm {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  left: 0;
-  top: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
 body {
   overflow: hidden;
   color: var(--paper);

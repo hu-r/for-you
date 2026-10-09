@@ -330,41 +330,22 @@ function stopBed() {
 function rampVolume(audio, target, ms) {
   const from = audio.volume;
   const started = performance.now();
-  window.clearInterval(audio._ramp);
-  audio._ramp = window.setInterval(() => {
-    if (song !== audio) {
-      window.clearInterval(audio._ramp);
-      return;
-    }
-    const amount = Math.min(1, (performance.now() - started) / ms);
+  const tick = (now) => {
+    if (song !== audio) return;
+    const amount = Math.min(1, (now - started) / ms);
     audio.volume = from + (target - from) * amount;
-    if (amount >= 1) window.clearInterval(audio._ramp);
-  }, 140);
-}
-
-function ensureSong() {
-  if (script.music !== "file" || !script.musicSrc) return null;
-  if (!song) {
-    song = document.getElementById("bgm");
-    if (!song) return null;
-    song.loop = true;
-    song.preload = "auto";
-    song.playsInline = true;
-  }
-  if (song.dataset.src !== script.musicSrc) {
-    song.volume = 0.5;
-    song.src = script.musicSrc;
-    song.dataset.src = script.musicSrc;
-  }
-  return song;
+    if (amount < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 function prepareSong() {
-  const audio = ensureSong();
-  if (!audio || musicOn || !audio.paused) return;
-  audio.volume = 0.5;
-  const pending = audio.play();
-  if (pending && typeof pending.then === "function") pending.catch(() => {});
+  if (script.music !== "file" || !script.musicSrc || song) return;
+  song = new Audio(script.musicSrc);
+  song.loop = true;
+  song.volume = 0;
+  const pending = song.play();
+  if (pending) pending.catch(() => {});
 }
 
 let previewing = false;
@@ -385,17 +366,10 @@ function startMusic() {
   if (musicOn) return;
   if (script.music === "off") return;
   if (script.music === "file" && script.musicSrc) {
-    const audio = ensureSong();
-    if (!audio) return;
+    if (!song) prepareSong();
+    if (!song) return;
     musicOn = true;
-    audio.volume = 0.5;
-    if (!audio.paused) return;
-    const pending = audio.play();
-    if (pending && typeof pending.then === "function") {
-      pending.catch(() => {
-        musicOn = false;
-      });
-    }
+    rampVolume(song, 0.5, 1800);
     return;
   }
   unlockAudio();
@@ -454,7 +428,7 @@ function bindHold(button, { duration, onDone, blows }) {
 
   const begin = () => {
     if (button === light) {
-      if (script.music !== "file") unlockAudio();
+      unlockAudio();
       prepareSong();
     }
     if (button === quench && body.classList.contains("is-blow-cue")) armMic();
@@ -1776,15 +1750,6 @@ function readEmbedded() {
   return null;
 }
 
-function albumRichness(list) {
-  if (!Array.isArray(list)) return 0;
-  return list.reduce((sum, page) => {
-    const bits = [page?.date, page?.place, page?.text];
-    (page?.photos || []).forEach((photo) => bits.push(photo?.text, photo?.src));
-    return sum + bits.filter(Boolean).join("").replace(/\s/g, "").length;
-  }, 0);
-}
-
 function applyAlbum(data) {
   pages = data.pages;
   settlePages(pages);
@@ -1804,27 +1769,16 @@ async function loadContent() {
     /* 直接打开文件时读不到旁边的 json */
   }
   if (!fileAlbum) fileAlbum = readEmbedded();
+  if (fileAlbum) {
+    applyAlbum(fileAlbum);
+    return;
+  }
   const stored = await idbGet();
   const idbAlbum = Array.isArray(stored)
     ? { pages: stored }
     : stored && Array.isArray(stored.pages)
       ? stored
       : null;
-  const fileScore = fileAlbum ? albumRichness(fileAlbum.pages) : -1;
-  const idbScore = idbAlbum ? albumRichness(idbAlbum.pages) : -1;
-  if (idbAlbum && idbScore > fileScore) {
-    applyAlbum(idbAlbum);
-    try {
-      await saveAlbum();
-    } catch {
-      pendingFileSave = true;
-    }
-    return;
-  }
-  if (fileAlbum) {
-    applyAlbum(fileAlbum);
-    return;
-  }
   if (idbAlbum) applyAlbum(idbAlbum);
 }
 

@@ -359,12 +359,10 @@ function prepareSong() {
     song.loop = true;
     song.volume = 0.5;
     song.src = script.musicSrc;
-    song.load();
     return;
   }
   if (song.getAttribute("src") !== script.musicSrc && !song.src.endsWith(script.musicSrc)) {
     song.src = script.musicSrc;
-    song.load();
   }
 }
 
@@ -1741,20 +1739,21 @@ function applyAlbum(data) {
   pages = data.pages;
   settlePages(pages);
   if (data.script) takeScript(data.script);
-  prepareSong();
   buildWall();
 }
 
 async function loadContent() {
   let fileAlbum = readEmbedded();
-  try {
-    const response = await fetch("content.json", { cache: "no-store" });
-    if (response.ok) {
-      const data = await response.json();
-      if (Array.isArray(data.pages) && data.pages.length) fileAlbum = data;
+  if (!fileAlbum) {
+    try {
+      const response = await fetch("content.json", { cache: "no-store" });
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.pages) && data.pages.length) fileAlbum = data;
+      }
+    } catch {
+      /* 直接打开文件时读不到旁边的 json */
     }
-  } catch {
-    /* 直接打开文件时读不到旁边的 json */
   }
   const stored = await idbGet();
   const idbAlbum = Array.isArray(stored)

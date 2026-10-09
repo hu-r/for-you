@@ -108,20 +108,12 @@ function buildWall() {
     if (photos.length > 20) print.style.width = "min(108px, 18vw)";
     else if (photos.length > 12) print.style.width = "min(128px, 22vw)";
     if (photo.src) {
-      print.innerHTML = `<span class="sheet has-photo"><img alt="" data-src="${escapeHtml(photo.src)}" /></span>`;
+      print.innerHTML = `<span class="sheet has-photo"><img src="${escapeHtml(photo.src)}" alt="" /></span>`;
+      bindOrientation(print.querySelector("img"), print);
     } else {
       print.innerHTML = `<span class="sheet ${photo.tone || ""}"><em>照片</em></span>`;
     }
     wall.appendChild(print);
-  });
-  if (body.classList.contains("is-finale") || body.classList.contains("is-out")) wakeWall();
-}
-
-function wakeWall() {
-  wall.querySelectorAll("img[data-src]").forEach((img) => {
-    if (img.getAttribute("src")) return;
-    img.src = img.dataset.src;
-    bindOrientation(img, img.closest(".print"));
   });
 }
 
@@ -202,7 +194,7 @@ let script = {
   bridge: "感谢你\n陪我走过一天又一天\n这些天见证你的成长\n也见证我的成长",
   wish: "生日快乐 许个愿吧",
   pace: 1,
-  blow: "吹蜡烛",
+  blow: "长按熄灭蜡烛",
   blessing: "哥哥\n生日快乐\n愿你快乐",
   music: "night",
   musicSrc: "",
@@ -433,13 +425,14 @@ function bindHold(button, { duration, onDone, blows }) {
     else last = 0;
   };
 
+  let fingers = 0;
+
   const begin = () => {
+    if (holding || blocked()) return;
     if (button === light) {
       unlockAudio();
       primeSong();
-      armMic();
     }
-    if (button === quench) armMic();
     holding = true;
     last = 0;
     cancelAnimationFrame(frame);
@@ -450,20 +443,19 @@ function bindHold(button, { duration, onDone, blows }) {
     holding = false;
   };
 
-  let touchHeld = false;
   button.addEventListener("touchstart", (event) => {
     if (blocked()) return;
     event.preventDefault();
-    touchHeld = true;
+    fingers += 1;
     begin();
   }, { passive: false });
   button.addEventListener("touchend", () => {
-    touchHeld = false;
-    stop();
+    fingers = Math.max(0, fingers - 1);
+    if (!fingers) stop();
   });
   button.addEventListener("touchcancel", () => {
-    touchHeld = false;
-    stop();
+    fingers = Math.max(0, fingers - 1);
+    if (!fingers) stop();
   });
   button.addEventListener("pointerdown", (event) => {
     if (blocked()) return;
@@ -476,12 +468,14 @@ function bindHold(button, { duration, onDone, blows }) {
     }
     begin();
   });
-  button.addEventListener("pointerup", stop);
-  button.addEventListener("pointercancel", () => {
-    if (touchHeld) return;
+  button.addEventListener("pointerup", () => {
+    if (fingers) return;
     stop();
   });
-  button.addEventListener("selectstart", (event) => event.preventDefault());
+  button.addEventListener("pointercancel", () => {
+    if (fingers) return;
+    stop();
+  });
   button.addEventListener("keydown", (event) => {
     if (event.repeat || blocked()) return;
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -685,7 +679,6 @@ async function candleBeat() {
 }
 
 async function bridgeBeat() {
-  (pages[0]?.photos || []).slice(0, 3).forEach(warmPhoto);
   scene = "bridge";
   skipHint.textContent = pageHint;
   showing = false;
@@ -709,7 +702,6 @@ async function bridgeBeat() {
 }
 
 function enterFinale() {
-  wakeWall();
   scene = "finale";
   skipHint.textContent = pageHint;
   showing = false;
@@ -722,7 +714,6 @@ function enterFinale() {
   requestAnimationFrame(() => body.classList.add("is-finale"));
   if (!wishArmed) {
     wishArmed = true;
-    armMicIfGranted();
     window.clearTimeout(blowTimer);
     blowTimer = window.setTimeout(() => {
       if (!out && scene === "finale") body.classList.add("is-blow-cue");
@@ -786,40 +777,6 @@ function afterPaint() {
   });
 }
 
-const warmed = new Set();
-
-function warmPhoto(photo) {
-  const src = photo?.src;
-  if (!src || warmed.has(src)) return;
-  warmed.add(src);
-  const img = new Image();
-  img.decoding = "async";
-  img.src = src;
-}
-
-function warmAhead(index, slot) {
-  const page = pages[index];
-  if (!page) return;
-  warmPhoto(page.photos[slot + 1] || pages[index + 1]?.photos?.[0]);
-}
-
-function readyPhotos(root) {
-  const images = [...root.querySelectorAll(".shot.has-photo img")];
-  return Promise.all(images.map((img) => {
-    if (img.complete && img.naturalWidth) return Promise.resolve();
-    const done = typeof img.decode === "function"
-      ? img.decode().catch(() => {})
-      : new Promise((resolve) => {
-          img.addEventListener("load", resolve, { once: true });
-          img.addEventListener("error", resolve, { once: true });
-        });
-    return Promise.race([
-      done,
-      new Promise((resolve) => window.setTimeout(resolve, 700)),
-    ]);
-  }));
-}
-
 async function present(index, fromEnd) {
   cursor = index;
   const page = pages[index];
@@ -830,8 +787,6 @@ async function present(index, fromEnd) {
 async function presentGroup(page, index) {
   move = null;
   showSlide(page, index);
-  warmAhead(index, 0);
-  await readyPhotos(stage);
   await afterPaint();
   if (move) return move;
   body.classList.remove("is-dim");
@@ -854,8 +809,6 @@ async function presentReel(page, index, fromEnd) {
   let slot = fromEnd ? page.photos.length - 1 : 0;
   move = null;
   showSlide(page, index, slot);
-  warmAhead(index, slot);
-  await readyPhotos(stage);
   await afterPaint();
   body.classList.remove("is-dim");
   stage.classList.add("is-in");
@@ -911,8 +864,6 @@ async function glidePhoto(page, slot) {
     reelMark.textContent = `${slot + 1} / ${page.photos.length}`;
     skipHint.textContent = reelHint(slot, page.photos.length);
     stage.classList.add("has-words");
-    warmAhead(cursor, slot);
-    await readyPhotos(frame);
     await afterPaint();
     frame.classList.remove("is-arrive");
     await hold(motion(500));
@@ -1205,94 +1156,6 @@ function burst(button) {
   }
 }
 
-let micState = "idle";
-let micStream = null;
-
-function armMicIfGranted() {
-  const permissions = navigator.permissions;
-  if (!permissions?.query) return;
-  permissions
-    .query({ name: "microphone" })
-    .then((status) => {
-      if (status.state === "granted") armMic();
-    })
-    .catch(() => {
-      /* 等他按住火苗时再问 */
-    });
-}
-
-function armMic() {
-  if (micState === "on" || micState === "asking" || !navigator.mediaDevices?.getUserMedia) return;
-  micState = "asking";
-  const attempts = [
-    { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } },
-    { audio: true },
-  ];
-  const ask = (index) => {
-    navigator.mediaDevices
-      .getUserMedia(attempts[index])
-      .then((stream) => {
-        micState = "on";
-        micStream = stream;
-        watchBlow(stream);
-      })
-      .catch(() => {
-        if (index + 1 < attempts.length) ask(index + 1);
-        else micState = "denied";
-      });
-  };
-  ask(0);
-}
-
-function watchBlow(stream) {
-  unlockAudio();
-  if (!audioCtx) return;
-  audioCtx.resume();
-  let source;
-  try {
-    source = audioCtx.createMediaStreamSource(stream);
-  } catch {
-    return;
-  }
-  const analyser = audioCtx.createAnalyser();
-  analyser.fftSize = 1024;
-  source.connect(analyser);
-  const bins = new Uint8Array(analyser.fftSize);
-  let ambient = 0.02;
-  let hot = 0;
-  let warmed = 0;
-  const watch = () => {
-    if (out) return;
-    if (audioCtx.state === "suspended") audioCtx.resume();
-    analyser.getByteTimeDomainData(bins);
-    let sum = 0;
-    for (let index = 0; index < bins.length; index += 1) {
-      const sample = (bins[index] - 128) / 128;
-      sum += sample * sample;
-    }
-    const rms = Math.sqrt(sum / bins.length);
-    warmed += 1;
-    if (warmed < 36) {
-      ambient = ambient * 0.86 + rms * 0.14;
-      requestAnimationFrame(watch);
-      return;
-    }
-    const loud = rms > 0.045 && rms - ambient > 0.02 && rms > ambient * 1.55;
-    if (!loud) ambient = ambient * 0.985 + rms * 0.015;
-    hot = loud ? hot + 1 : 0;
-    const opening = lit && !body.classList.contains("is-show") && !body.classList.contains("is-bridge") && !body.classList.contains("is-finale");
-    const lean = loud ? Math.min(1, (rms - ambient) / 0.16) : 0;
-    if (opening) light.style.setProperty("--blow", lean.toFixed(3));
-    if (body.classList.contains("is-finale")) quench.style.setProperty("--blow", lean.toFixed(3));
-    if (hot >= 4 && (opening || body.classList.contains("is-finale"))) {
-      extinguish();
-      return;
-    }
-    requestAnimationFrame(watch);
-  };
-  requestAnimationFrame(watch);
-}
-
 function extinguish() {
   if (out) return;
   const fromOpening = !body.classList.contains("is-finale");
@@ -1306,15 +1169,19 @@ function extinguish() {
   burst(candle);
   swellMusic();
   startFireworks();
-  micStream?.getTracks().forEach((track) => track.stop());
   window.setTimeout(() => {
     finale.hidden = false;
     body.classList.add("is-finale", "is-out");
   }, 420);
 }
 
-finale.addEventListener("pointerdown", () => {
-  if (!out) armMic();
+document.addEventListener("selectstart", (event) => {
+  if (event.target instanceof Element && event.target.closest(".editor input, .editor textarea")) return;
+  event.preventDefault();
+});
+document.addEventListener("contextmenu", (event) => {
+  if (event.target instanceof Element && event.target.closest(".editor")) return;
+  event.preventDefault();
 });
 
 bindHold(light, { duration: 1100, onDone: catchFlame });
@@ -1621,11 +1488,6 @@ function readFile(file) {
     reader.readAsDataURL(file);
   });
 }
-
-document.addEventListener("selectstart", (event) => {
-  if (event.target instanceof Element && event.target.closest(".editor")) return;
-  event.preventDefault();
-});
 
 document.getElementById("watch-pace").addEventListener("input", (event) => {
   showPace(1.5 - Number(event.target.value) / 10);

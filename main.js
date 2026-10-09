@@ -108,13 +108,26 @@ function buildWall() {
     if (photos.length > 20) print.style.width = "min(108px, 18vw)";
     else if (photos.length > 12) print.style.width = "min(128px, 22vw)";
     if (photo.src) {
-      print.innerHTML = `<span class="sheet has-photo"><img src="${escapeHtml(photo.src)}" alt="" /></span>`;
-      bindOrientation(print.querySelector("img"), print);
+      print.innerHTML = `<span class="sheet has-photo"><img alt="" data-src="${escapeHtml(photo.src)}" /></span>`;
     } else {
       print.innerHTML = `<span class="sheet ${photo.tone || ""}"><em>照片</em></span>`;
     }
     wall.appendChild(print);
   });
+}
+
+function wakeWall() {
+  const imgs = [...wall.querySelectorAll("img[data-src]")].filter((img) => !img.getAttribute("src"));
+  let index = 0;
+  const step = () => {
+    imgs.slice(index, index + 3).forEach((img) => {
+      img.src = img.dataset.src;
+      bindOrientation(img, img.closest(".print"));
+    });
+    index += 3;
+    if (index < imgs.length) window.setTimeout(step, 220);
+  };
+  if (imgs.length) step();
 }
 
 buildWall();
@@ -338,13 +351,27 @@ function rampVolume(audio, target, ms) {
   requestAnimationFrame(tick);
 }
 
-function primeSong() {
+function prepareSong() {
   if (script.music !== "file" || !script.musicSrc) return;
   if (!song) {
-    song = new Audio(script.musicSrc);
+    song = new Audio();
+    song.preload = "auto";
     song.loop = true;
-    song.volume = 0;
+    song.volume = 0.5;
+    song.src = script.musicSrc;
+    song.load();
+    return;
   }
+  if (song.getAttribute("src") !== script.musicSrc && !song.src.endsWith(script.musicSrc)) {
+    song.src = script.musicSrc;
+    song.load();
+  }
+}
+
+function primeSong() {
+  prepareSong();
+  if (!song) return;
+  song.volume = 0.5;
   const pending = song.play();
   if (pending) pending.catch(() => {});
 }
@@ -364,15 +391,13 @@ function stopPreview() {
 }
 
 function startMusic() {
-  if (musicOn) return;
   if (script.music === "off") return;
   if (script.music === "file" && script.musicSrc) {
-    if (!song) primeSong();
-    if (!song) return;
-    song.volume = 0.5;
+    primeSong();
     musicOn = true;
     return;
   }
+  if (musicOn) return;
   unlockAudio();
   if (!audioCtx) return;
   musicOn = true;
@@ -500,7 +525,7 @@ async function catchFlame() {
   body.classList.add("is-lit");
   stopPreview();
   startMusic();
-  await ready;
+  if (!pages.length) await ready;
   play();
 }
 
@@ -704,6 +729,7 @@ async function bridgeBeat() {
 }
 
 function enterFinale() {
+  wakeWall();
   scene = "finale";
   skipHint.textContent = pageHint;
   showing = false;
@@ -1656,11 +1682,12 @@ function applyAlbum(data) {
   pages = data.pages;
   settlePages(pages);
   if (data.script) takeScript(data.script);
+  prepareSong();
   buildWall();
 }
 
 async function loadContent() {
-  let fileAlbum = null;
+  let fileAlbum = readEmbedded();
   try {
     const response = await fetch("content.json", { cache: "no-store" });
     if (response.ok) {
@@ -1670,7 +1697,6 @@ async function loadContent() {
   } catch {
     /* 直接打开文件时读不到旁边的 json */
   }
-  if (!fileAlbum) fileAlbum = readEmbedded();
   const stored = await idbGet();
   const idbAlbum = Array.isArray(stored)
     ? { pages: stored }
@@ -1695,4 +1721,6 @@ async function loadContent() {
   if (idbAlbum) applyAlbum(idbAlbum);
 }
 
+const firstAlbum = readEmbedded();
+if (firstAlbum) applyAlbum(firstAlbum);
 const ready = loadContent();

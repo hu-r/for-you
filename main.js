@@ -108,20 +108,12 @@ function buildWall() {
     if (photos.length > 20) print.style.width = "min(108px, 18vw)";
     else if (photos.length > 12) print.style.width = "min(128px, 22vw)";
     if (photo.src) {
-      print.innerHTML = `<span class="sheet has-photo"><img alt="" data-src="${escapeHtml(photo.src)}" /></span>`;
+      print.innerHTML = `<span class="sheet has-photo"><img src="${escapeHtml(photo.src)}" alt="" /></span>`;
+      bindOrientation(print.querySelector("img"), print);
     } else {
       print.innerHTML = `<span class="sheet ${photo.tone || ""}"><em>照片</em></span>`;
     }
     wall.appendChild(print);
-  });
-  if (body.classList.contains("is-finale") || body.classList.contains("is-out")) wakeWall();
-}
-
-function wakeWall() {
-  wall.querySelectorAll("img[data-src]").forEach((img) => {
-    if (img.getAttribute("src")) return;
-    img.src = img.dataset.src;
-    bindOrientation(img, img.closest(".print"));
   });
 }
 
@@ -687,7 +679,6 @@ async function candleBeat() {
 }
 
 async function bridgeBeat() {
-  (pages[0]?.photos || []).slice(0, 3).forEach(warmPhoto);
   scene = "bridge";
   skipHint.textContent = pageHint;
   showing = false;
@@ -711,7 +702,6 @@ async function bridgeBeat() {
 }
 
 function enterFinale() {
-  wakeWall();
   scene = "finale";
   skipHint.textContent = pageHint;
   showing = false;
@@ -787,40 +777,6 @@ function afterPaint() {
   });
 }
 
-const warmed = new Set();
-
-function warmPhoto(photo) {
-  const src = photo?.src;
-  if (!src || warmed.has(src)) return;
-  warmed.add(src);
-  const img = new Image();
-  img.decoding = "async";
-  img.src = src;
-}
-
-function warmAhead(index, slot) {
-  const page = pages[index];
-  if (!page) return;
-  warmPhoto(page.photos[slot + 1] || pages[index + 1]?.photos?.[0]);
-}
-
-function readyPhotos(root) {
-  const images = [...root.querySelectorAll(".shot.has-photo img")];
-  return Promise.all(images.map((img) => {
-    if (img.complete && img.naturalWidth) return Promise.resolve();
-    const done = typeof img.decode === "function"
-      ? img.decode().catch(() => {})
-      : new Promise((resolve) => {
-          img.addEventListener("load", resolve, { once: true });
-          img.addEventListener("error", resolve, { once: true });
-        });
-    return Promise.race([
-      done,
-      new Promise((resolve) => window.setTimeout(resolve, 700)),
-    ]);
-  }));
-}
-
 async function present(index, fromEnd) {
   cursor = index;
   const page = pages[index];
@@ -831,8 +787,6 @@ async function present(index, fromEnd) {
 async function presentGroup(page, index) {
   move = null;
   showSlide(page, index);
-  warmAhead(index, 0);
-  await readyPhotos(stage);
   await afterPaint();
   if (move) return move;
   body.classList.remove("is-dim");
@@ -855,8 +809,6 @@ async function presentReel(page, index, fromEnd) {
   let slot = fromEnd ? page.photos.length - 1 : 0;
   move = null;
   showSlide(page, index, slot);
-  warmAhead(index, slot);
-  await readyPhotos(stage);
   await afterPaint();
   body.classList.remove("is-dim");
   stage.classList.add("is-in");
@@ -912,8 +864,6 @@ async function glidePhoto(page, slot) {
     reelMark.textContent = `${slot + 1} / ${page.photos.length}`;
     skipHint.textContent = reelHint(slot, page.photos.length);
     stage.classList.add("has-words");
-    warmAhead(cursor, slot);
-    await readyPhotos(frame);
     await afterPaint();
     frame.classList.remove("is-arrive");
     await hold(motion(500));

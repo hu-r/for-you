@@ -108,13 +108,26 @@ function buildWall() {
     if (photos.length > 20) print.style.width = "min(108px, 18vw)";
     else if (photos.length > 12) print.style.width = "min(128px, 22vw)";
     if (photo.src) {
-      print.innerHTML = `<span class="sheet has-photo"><img src="${escapeHtml(photo.src)}" alt="" /></span>`;
-      bindOrientation(print.querySelector("img"), print);
+      print.innerHTML = `<span class="sheet has-photo"><img alt="" data-src="${escapeHtml(photo.src)}" /></span>`;
     } else {
       print.innerHTML = `<span class="sheet ${photo.tone || ""}"><em>照片</em></span>`;
     }
     wall.appendChild(print);
   });
+}
+
+function wakeWall() {
+  const imgs = [...wall.querySelectorAll("img[data-src]")].filter((img) => !img.getAttribute("src"));
+  let index = 0;
+  const step = () => {
+    imgs.slice(index, index + 3).forEach((img) => {
+      img.src = img.dataset.src;
+      bindOrientation(img, img.closest(".print"));
+    });
+    index += 3;
+    if (index < imgs.length) window.setTimeout(step, 220);
+  };
+  if (imgs.length) step();
 }
 
 buildWall();
@@ -236,6 +249,7 @@ function applyScript() {
   blessing.innerHTML = (blessingLines.length ? blessingLines : [""])
     .map((line) => `<span>${escapeHtml(line)}</span>`)
     .join("");
+  attachSong();
 }
 
 function unlockAudio() {
@@ -338,13 +352,25 @@ function rampVolume(audio, target, ms) {
   requestAnimationFrame(tick);
 }
 
+function attachSong() {
+  const node = document.getElementById("song");
+  if (!node) return;
+  song = node;
+  node.loop = true;
+  if (script.music === "file" && script.musicSrc && node.getAttribute("src") !== script.musicSrc) {
+    node.src = script.musicSrc;
+  }
+}
+
 function primeSong() {
-  if (script.music !== "file" || !script.musicSrc) return;
-  song = new Audio(script.musicSrc);
-  song.loop = true;
-  song.volume = 0;
-  const pending = song.play();
-  if (pending) pending.catch(() => {});
+  attachSong();
+  if (!song || script.music !== "file" || !script.musicSrc) return;
+  song.volume = 0.5;
+  if (song.paused) {
+    const pending = song.play();
+    if (pending) pending.catch(() => {});
+  }
+  musicOn = true;
 }
 
 let previewing = false;
@@ -362,15 +388,12 @@ function stopPreview() {
 }
 
 function startMusic() {
-  if (musicOn) return;
   if (script.music === "off") return;
   if (script.music === "file" && script.musicSrc) {
-    if (!song) primeSong();
-    if (!song) return;
-    musicOn = true;
-    rampVolume(song, 0.5, 1800);
+    primeSong();
     return;
   }
+  if (musicOn) return;
   unlockAudio();
   if (!audioCtx) return;
   musicOn = true;
@@ -430,7 +453,7 @@ function bindHold(button, { duration, onDone, blows }) {
   const begin = () => {
     if (holding || blocked()) return;
     if (button === light) {
-      unlockAudio();
+      if (script.music !== "file") unlockAudio();
       primeSong();
     }
     holding = true;
@@ -702,6 +725,7 @@ async function bridgeBeat() {
 }
 
 function enterFinale() {
+  wakeWall();
   scene = "finale";
   skipHint.textContent = pageHint;
   showing = false;

@@ -423,11 +423,23 @@ function swellMusic() {
   filter.frequency.linearRampToValueAtTime(3200, now + 1.4);
 }
 
+function editingField(node) {
+  return node instanceof Element && node.closest(".editor input, .editor textarea");
+}
+
+function clearTextPick() {
+  if (editingField(document.activeElement)) return;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) sel.removeAllRanges();
+}
+
 function bindHold(button, { duration, onDone, blows }) {
   let holding = false;
   let value = 0;
   let last = 0;
   let frame = 0;
+  let fingers = 0;
+  let mouseDown = false;
 
   const blocked = () => out || (button === light && lit) || (button === quench && !lit);
 
@@ -444,6 +456,8 @@ function bindHold(button, { duration, onDone, blows }) {
     button.classList.toggle("is-blowing", holding && !!blows);
     if (value >= 1) {
       holding = false;
+      fingers = 0;
+      mouseDown = false;
       button.classList.remove("is-blowing");
       onDone();
       return;
@@ -452,10 +466,9 @@ function bindHold(button, { duration, onDone, blows }) {
     else last = 0;
   };
 
-  let fingers = 0;
-
   const begin = () => {
     if (holding || blocked()) return;
+    clearTextPick();
     if (button === light) {
       unlockAudio();
       primeSong();
@@ -470,39 +483,63 @@ function bindHold(button, { duration, onDone, blows }) {
     holding = false;
   };
 
+  const releaseTouch = () => {
+    fingers = Math.max(0, fingers - 1);
+    if (!fingers && !mouseDown) stop();
+  };
+
   button.addEventListener("touchstart", (event) => {
     if (blocked()) return;
     event.preventDefault();
+    clearTextPick();
     fingers += 1;
     begin();
   }, { passive: false });
-  button.addEventListener("touchend", () => {
-    fingers = Math.max(0, fingers - 1);
-    if (!fingers) stop();
-  });
-  button.addEventListener("touchcancel", () => {
-    fingers = Math.max(0, fingers - 1);
-    if (!fingers) stop();
+  button.addEventListener("touchmove", (event) => {
+    if (!holding) return;
+    event.preventDefault();
+    clearTextPick();
+  }, { passive: false });
+  button.addEventListener("touchend", releaseTouch);
+  button.addEventListener("touchcancel", (event) => {
+    event.preventDefault();
+    clearTextPick();
   });
   button.addEventListener("pointerdown", (event) => {
     if (blocked()) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     event.preventDefault();
-    try {
-      button.setPointerCapture?.(event.pointerId);
-    } catch {
-      /* 按住仍然继续 */
+    clearTextPick();
+    if (event.pointerType === "mouse") {
+      mouseDown = true;
+      try {
+        button.setPointerCapture?.(event.pointerId);
+      } catch {
+        /* 按住仍然继续 */
+      }
     }
     begin();
   });
-  button.addEventListener("pointerup", () => {
+  button.addEventListener("pointerup", (event) => {
+    if (event.pointerType === "mouse") mouseDown = false;
     if (fingers) return;
     stop();
   });
-  button.addEventListener("pointercancel", () => {
+  button.addEventListener("pointercancel", (event) => {
+    clearTextPick();
     if (fingers) return;
-    stop();
+    if (event.pointerType === "mouse") {
+      mouseDown = false;
+      stop();
+    }
   });
+  window.addEventListener("touchend", (event) => {
+    if (!holding || event.touches.length) return;
+    fingers = 0;
+    if (!mouseDown) stop();
+  }, { capture: true });
+  button.addEventListener("selectstart", (event) => event.preventDefault());
+  button.addEventListener("dragstart", (event) => event.preventDefault());
   button.addEventListener("keydown", (event) => {
     if (event.repeat || blocked()) return;
     if (event.key !== "Enter" && event.key !== " ") return;
@@ -1220,11 +1257,16 @@ function extinguish() {
 }
 
 document.addEventListener("selectstart", (event) => {
-  if (event.target instanceof Element && event.target.closest(".editor input, .editor textarea")) return;
+  if (editingField(event.target)) return;
   event.preventDefault();
 });
+document.addEventListener("selectionchange", clearTextPick);
 document.addEventListener("contextmenu", (event) => {
   if (event.target instanceof Element && event.target.closest(".editor")) return;
+  event.preventDefault();
+});
+document.addEventListener("dragstart", (event) => {
+  if (editingField(event.target)) return;
   event.preventDefault();
 });
 
@@ -1502,6 +1544,7 @@ function takeScript(data) {
   ["opening", "bridge", "wish", "blow", "blessing", "music", "musicSrc", "musicName"].forEach((key) => {
     if (typeof data[key] === "string") script[key] = data[key];
   });
+  if (script.blow === "吹蜡烛吧" || script.blow === "吹蜡烛") script.blow = "长按熄灭蜡烛";
   if (typeof data.pace === "number" && Number.isFinite(data.pace)) showPace(data.pace);
   applyScript();
 }

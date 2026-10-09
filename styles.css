@@ -11,6 +11,10 @@
 
 * {
   box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-user-drag: none;
 }
 
 html,
@@ -112,6 +116,7 @@ body.is-out #fireworks {
 .gate {
   min-height: 100vh;
   min-height: 100svh;
+  touch-action: none;
   transition: opacity 1s ease;
 }
 
@@ -143,7 +148,15 @@ body.is-out .gate {
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
+  -webkit-user-drag: none;
   touch-action: none;
+}
+
+.candle * {
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .candle:focus-visible {
@@ -333,6 +346,7 @@ body.is-out .halo {
   letter-spacing: 0.2em;
   color: rgba(243, 236, 223, 0.86);
   text-align: center;
+  pointer-events: none;
 }
 
 .light-hint {
@@ -345,6 +359,7 @@ body.is-out .halo {
   letter-spacing: 0.28em;
   color: rgba(243, 236, 223, 0.46);
   white-space: nowrap;
+  pointer-events: none;
   transition: opacity 0.6s ease;
 }
 
@@ -784,6 +799,7 @@ body.is-lit:not(.is-out):not(.is-editing):not(.is-finale) .pace-dock {
   padding: 10vh 24px calc(28px + env(safe-area-inset-bottom));
   opacity: 0;
   pointer-events: none;
+  touch-action: none;
 }
 
 body.is-finale .finale {
@@ -925,6 +941,9 @@ body.is-out .print {
   width: min(16em, calc(100% - 48px));
   margin-top: 22px;
   text-align: center;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .wish,
@@ -1206,6 +1225,7 @@ body.is-editing .edit-entry {
   -webkit-user-select: text;
   user-select: text;
   -webkit-touch-callout: default;
+  -webkit-user-drag: auto;
 }
 
 .editor {

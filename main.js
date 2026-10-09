@@ -108,19 +108,12 @@ function buildWall() {
     if (photos.length > 20) print.style.width = "min(108px, 18vw)";
     else if (photos.length > 12) print.style.width = "min(128px, 22vw)";
     if (photo.src) {
-      print.innerHTML = `<span class="sheet has-photo"><img alt="" data-src="${escapeHtml(photo.src)}" decoding="async" /></span>`;
+      print.innerHTML = `<span class="sheet has-photo"><img src="${escapeHtml(photo.src)}" alt="" /></span>`;
+      bindOrientation(print.querySelector("img"), print);
     } else {
       print.innerHTML = `<span class="sheet ${photo.tone || ""}"><em>照片</em></span>`;
     }
     wall.appendChild(print);
-  });
-}
-
-function wakeWall() {
-  wall.querySelectorAll("img[data-src]").forEach((img) => {
-    if (img.getAttribute("src")) return;
-    img.src = img.dataset.src;
-    bindOrientation(img, img.closest(".print"));
   });
 }
 
@@ -349,23 +342,17 @@ function rampVolume(audio, target, ms) {
   }, 140);
 }
 
-let songPrimed = false;
-
 function ensureSong() {
   if (script.music !== "file" || !script.musicSrc) return null;
-  if (song && song.dataset.src !== script.musicSrc) {
-    song.pause();
-    song = null;
-    songPrimed = false;
-  }
   if (!song) {
-    song = new Audio();
+    song = document.getElementById("bgm");
+    if (!song) return null;
     song.loop = true;
     song.preload = "auto";
     song.playsInline = true;
-    song.setAttribute("playsinline", "");
-    song.setAttribute("webkit-playsinline", "");
-    song.volume = 0;
+  }
+  if (song.dataset.src !== script.musicSrc) {
+    song.volume = 0.5;
     song.src = script.musicSrc;
     song.dataset.src = script.musicSrc;
   }
@@ -374,27 +361,10 @@ function ensureSong() {
 
 function prepareSong() {
   const audio = ensureSong();
-  if (!audio || musicOn || songPrimed) return;
-  songPrimed = true;
-  audio.muted = false;
-  audio.volume = 0;
+  if (!audio || musicOn || !audio.paused) return;
+  audio.volume = 0.5;
   const pending = audio.play();
-  if (pending && typeof pending.then === "function") {
-    pending.catch(() => {
-      songPrimed = false;
-    });
-  }
-}
-
-function parkSong() {
-  if (musicOn || !song) return;
-  songPrimed = false;
-  song.pause();
-  try {
-    song.currentTime = 0;
-  } catch {
-    /* 还没开始 */
-  }
+  if (pending && typeof pending.then === "function") pending.catch(() => {});
 }
 
 let previewing = false;
@@ -418,19 +388,14 @@ function startMusic() {
     const audio = ensureSong();
     if (!audio) return;
     musicOn = true;
-    audio.muted = false;
-    audio.volume = 0;
-    const fade = () => rampVolume(audio, 0.5, 2800);
-    if (!audio.paused) {
-      fade();
-      return;
-    }
+    audio.volume = 0.5;
+    if (!audio.paused) return;
     const pending = audio.play();
     if (pending && typeof pending.then === "function") {
-      pending.then(fade).catch(() => {
+      pending.catch(() => {
         musicOn = false;
       });
-    } else fade();
+    }
     return;
   }
   unlockAudio();
@@ -501,7 +466,6 @@ function bindHold(button, { duration, onDone, blows }) {
 
   const stop = () => {
     holding = false;
-    if (button === light && !lit) parkSong();
   };
 
   let touchHeld = false;
@@ -627,7 +591,7 @@ function bindOrientation(img, box) {
 
 function frameHtml(photo) {
   const tone = photo.src ? "has-photo" : photo.tone || "";
-  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" decoding="async" />` : "";
+  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" />` : "";
   const line = copyHtml(photo.text);
   const words = line ? `<figcaption class="copy">${line}</figcaption>` : "";
   return `<figure class="frame"><div class="shot ${tone}">${image}<span class="label">照片位</span><span class="wash"></span></div>${words}</figure>`;
@@ -769,7 +733,6 @@ async function bridgeBeat() {
 }
 
 function enterFinale() {
-  wakeWall();
   scene = "finale";
   skipHint.textContent = pageHint;
   showing = false;
@@ -1241,17 +1204,6 @@ window.addEventListener("resize", () => {
   if (showFireworks) fitFireworks();
 });
 
-window.addEventListener("pageshow", () => {
-  if (!musicOn && song) {
-    song.pause();
-    try {
-      song.currentTime = 0;
-    } catch {
-      /* 还没开始 */
-    }
-  }
-});
-
 function burst(button) {
   for (let index = 0; index < 8; index += 1) {
     const spark = document.createElement("i");
@@ -1354,7 +1306,6 @@ function extinguish() {
   candle.classList.add("dying");
   if (fromOpening) candle.style.setProperty("--blow", "1");
   burst(candle);
-  wakeWall();
   startFireworks();
   micStream?.getTracks().forEach((track) => track.stop());
   window.setTimeout(() => {

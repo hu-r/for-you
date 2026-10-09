@@ -108,12 +108,19 @@ function buildWall() {
     if (photos.length > 20) print.style.width = "min(108px, 18vw)";
     else if (photos.length > 12) print.style.width = "min(128px, 22vw)";
     if (photo.src) {
-      print.innerHTML = `<span class="sheet has-photo"><img src="${escapeHtml(photo.src)}" alt="" /></span>`;
-      bindOrientation(print.querySelector("img"), print);
+      print.innerHTML = `<span class="sheet has-photo"><img alt="" data-src="${escapeHtml(photo.src)}" decoding="async" /></span>`;
     } else {
       print.innerHTML = `<span class="sheet ${photo.tone || ""}"><em>照片</em></span>`;
     }
     wall.appendChild(print);
+  });
+}
+
+function wakeWall() {
+  wall.querySelectorAll("img[data-src]").forEach((img) => {
+    if (img.getAttribute("src")) return;
+    img.src = img.dataset.src;
+    bindOrientation(img, img.closest(".print"));
   });
 }
 
@@ -330,23 +337,26 @@ function stopBed() {
 function rampVolume(audio, target, ms) {
   const from = audio.volume;
   const started = performance.now();
-  const tick = (now) => {
-    if (song !== audio) return;
-    const amount = Math.min(1, (now - started) / ms);
+  window.clearInterval(audio._ramp);
+  audio._ramp = window.setInterval(() => {
+    if (song !== audio) {
+      window.clearInterval(audio._ramp);
+      return;
+    }
+    const amount = Math.min(1, (performance.now() - started) / ms);
     audio.volume = from + (target - from) * amount;
-    if (amount < 1) requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
+    if (amount >= 1) window.clearInterval(audio._ramp);
+  }, 140);
 }
 
-let songReady = false;
+let songPrimed = false;
 
 function ensureSong() {
   if (script.music !== "file" || !script.musicSrc) return null;
   if (song && song.dataset.src !== script.musicSrc) {
     song.pause();
     song = null;
-    songReady = false;
+    songPrimed = false;
   }
   if (!song) {
     song = new Audio();
@@ -364,25 +374,27 @@ function ensureSong() {
 
 function prepareSong() {
   const audio = ensureSong();
-  if (!audio || musicOn || songReady) return;
-  songReady = true;
-  audio.muted = true;
+  if (!audio || musicOn || songPrimed) return;
+  songPrimed = true;
+  audio.muted = false;
   audio.volume = 0;
   const pending = audio.play();
-  const park = () => {
-    if (musicOn) return;
-    audio.pause();
-    try {
-      audio.currentTime = 0;
-    } catch {
-      /* 还没开始 */
-    }
-  };
   if (pending && typeof pending.then === "function") {
-    pending.then(park).catch(() => {
-      songReady = false;
+    pending.catch(() => {
+      songPrimed = false;
     });
-  } else park();
+  }
+}
+
+function parkSong() {
+  if (musicOn || !song) return;
+  songPrimed = false;
+  song.pause();
+  try {
+    song.currentTime = 0;
+  } catch {
+    /* 还没开始 */
+  }
 }
 
 let previewing = false;
@@ -477,7 +489,7 @@ function bindHold(button, { duration, onDone, blows }) {
 
   const begin = () => {
     if (button === light) {
-      unlockAudio();
+      if (script.music !== "file") unlockAudio();
       prepareSong();
     }
     if (button === quench && body.classList.contains("is-blow-cue")) armMic();
@@ -489,6 +501,7 @@ function bindHold(button, { duration, onDone, blows }) {
 
   const stop = () => {
     holding = false;
+    if (button === light && !lit) parkSong();
   };
 
   let touchHeld = false;
@@ -614,7 +627,7 @@ function bindOrientation(img, box) {
 
 function frameHtml(photo) {
   const tone = photo.src ? "has-photo" : photo.tone || "";
-  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" />` : "";
+  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" decoding="async" />` : "";
   const line = copyHtml(photo.text);
   const words = line ? `<figcaption class="copy">${line}</figcaption>` : "";
   return `<figure class="frame"><div class="shot ${tone}">${image}<span class="label">照片位</span><span class="wash"></span></div>${words}</figure>`;
@@ -756,6 +769,7 @@ async function bridgeBeat() {
 }
 
 function enterFinale() {
+  wakeWall();
   scene = "finale";
   skipHint.textContent = pageHint;
   showing = false;
@@ -1340,6 +1354,7 @@ function extinguish() {
   candle.classList.add("dying");
   if (fromOpening) candle.style.setProperty("--blow", "1");
   burst(candle);
+  wakeWall();
   startFireworks();
   micStream?.getTracks().forEach((track) => track.stop());
   window.setTimeout(() => {

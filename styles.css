@@ -961,32 +961,32 @@ body.is-out .print {
 .finale-words {
   position: relative;
   z-index: 3;
-  display: grid;
-  align-items: start;
-  justify-items: center;
-  width: min(16em, calc(100% - 48px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  width: min(18em, calc(100% - 36px));
   margin-top: 22px;
   text-align: center;
 }
 
+.wish-slot {
+  display: grid;
+  justify-items: center;
+  width: 100%;
+}
+
 .wish,
 .blessing,
-.blow-cue {
+.blow-cue,
+.hold-hint {
   margin: 0;
-  font-size: 18px;
-  letter-spacing: 0.18em;
-  color: rgba(243, 236, 223, 0.9);
   text-align: center;
 }
 
 .wish,
-.blessing,
 .blow-cue {
   grid-area: 1 / 1;
-}
-
-.wish,
-.blow-cue {
   justify-self: center;
   align-self: start;
   width: max-content;
@@ -996,13 +996,24 @@ body.is-out .print {
   background: rgba(8, 12, 22, 0.82);
   color: #fff8ee;
   font-size: 22px;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
+  line-height: 1.35;
   text-shadow: 0 1px 2px rgba(8, 12, 22, 0.65);
   transition: opacity 0.9s ease;
 }
 
 .blow-cue {
   opacity: 0;
+}
+
+.hold-hint {
+  padding: 0.35em 0.8em;
+  border-radius: 999px;
+  background: rgba(8, 12, 22, 0.72);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  line-height: 1.5;
+  color: rgba(255, 248, 238, 0.92);
 }
 
 body.is-blow-cue:not(.is-out) .wish {
@@ -1017,21 +1028,30 @@ body.is-blow-cue:not(.is-out) .blow-cue {
   display: flex;
   flex-direction: column;
   gap: 0.28em;
+  height: 0;
+  overflow: hidden;
+  font-size: 18px;
+  letter-spacing: 0.18em;
   line-height: 1.7;
+  color: rgba(243, 236, 223, 0.9);
   opacity: 0;
-  transition: opacity 1.2s ease 0.45s;
+  pointer-events: none;
 }
 
-body.is-out .wish {
-  opacity: 0;
-  transition: opacity 0.6s ease;
+body.is-out .wish-slot,
+body.is-out .hold-hint {
+  display: none;
 }
 
 body.is-out .blessing {
+  height: auto;
+  overflow: visible;
   opacity: 1;
-  transition-delay: 1.15s;
+  pointer-events: auto;
+  transition: opacity 1.2s ease 0.45s;
 }
 
+body.is-out .wish,
 body.is-out .blow-cue {
   opacity: 0;
 }

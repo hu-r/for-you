@@ -125,7 +125,6 @@ let showing = false;
 let scene = "gate";
 let wishArmed = false;
 let move = null;
-let jumpTo = null;
 let cursor = 0;
 let skipWait = null;
 let blowTimer = 0;
@@ -339,8 +338,8 @@ function rampVolume(audio, target, ms) {
   requestAnimationFrame(tick);
 }
 
-function prepareSong() {
-  if (script.music !== "file" || !script.musicSrc || song) return;
+function primeSong() {
+  if (script.music !== "file" || !script.musicSrc) return;
   song = new Audio(script.musicSrc);
   song.loop = true;
   song.volume = 0;
@@ -366,7 +365,7 @@ function startMusic() {
   if (musicOn) return;
   if (script.music === "off") return;
   if (script.music === "file" && script.musicSrc) {
-    if (!song) prepareSong();
+    if (!song) primeSong();
     if (!song) return;
     musicOn = true;
     rampVolume(song, 0.5, 1800);
@@ -429,9 +428,10 @@ function bindHold(button, { duration, onDone, blows }) {
   const begin = () => {
     if (button === light) {
       unlockAudio();
-      prepareSong();
+      primeSong();
+      armMic();
     }
-    if (button === quench && body.classList.contains("is-blow-cue")) armMic();
+    if (button === quench) armMic();
     holding = true;
     last = 0;
     cancelAnimationFrame(frame);
@@ -646,13 +646,6 @@ function showPace(factor) {
   pacedWait?.retune();
 }
 
-function requestJump(index) {
-  if (!lit || out || !showing || body.classList.contains("is-editing")) return;
-  const last = Math.max(0, pages.length - 1);
-  jumpTo = Math.max(0, Math.min(last, index));
-  skipWait?.();
-}
-
 function nudge(direction) {
   if (!lit || out || body.classList.contains("is-editing")) return;
   if (direction === "back" && scene === "candle") return;
@@ -719,6 +712,7 @@ function enterFinale() {
   requestAnimationFrame(() => body.classList.add("is-finale"));
   if (!wishArmed) {
     wishArmed = true;
+    armMicIfGranted();
     window.clearTimeout(blowTimer);
     blowTimer = window.setTimeout(() => {
       if (!out && scene === "finale") body.classList.add("is-blow-cue");
@@ -752,12 +746,6 @@ async function play() {
       const direction = await present(index, fromEnd);
       fromEnd = false;
       if (out) return;
-      if (jumpTo != null) {
-        index = jumpTo;
-        jumpTo = null;
-        move = null;
-        continue;
-      }
       if (direction === "back") {
         if (index === 0) phase = "bridge";
         else {
@@ -795,32 +783,24 @@ async function present(index, fromEnd) {
   return presentGroup(page, index);
 }
 
-function jumped() {
-  return jumpTo != null;
-}
-
 async function presentGroup(page, index) {
   move = null;
   showSlide(page, index);
   await afterPaint();
-  if (jumped()) return "jump";
   if (move) return move;
   body.classList.remove("is-dim");
   stage.classList.add("is-in");
-  if (jumped()) return "jump";
   if (move) return move;
-  if (await hold(motion(320))) return jumped() ? "jump" : move || "next";
+  if (await hold(motion(320))) return move || "next";
   stage.classList.add("has-words");
-  if (jumped()) return "jump";
   if (move) return move;
   const words = `${page.text || ""}${page.photos.map((photo) => photo.text || "").join("")}`;
-  if (await hold(readMs(words), true)) return jumped() ? "jump" : move || "next";
+  if (await hold(readMs(words), true)) return move || "next";
   stage.classList.remove("is-in", "has-words");
   stage.classList.add("is-leaving");
   body.classList.add("is-dim");
-  if (jumped()) return "jump";
   if (move) return move;
-  if (await hold(motion(500))) return jumped() ? "jump" : move || "next";
+  if (await hold(motion(500))) return move || "next";
   return "next";
 }
 
@@ -833,19 +813,16 @@ async function presentReel(page, index, fromEnd) {
   stage.classList.add("is-in");
   let opened = false;
   while (!out) {
-    if (jumped()) return "jump";
     if (!move) {
       if (!opened) {
-        if (!(await hold(motion(320))) && !move && !jumped()) stage.classList.add("has-words");
+        if (!(await hold(motion(320))) && !move) stage.classList.add("has-words");
         opened = true;
       }
-      if (jumped()) return "jump";
       if (!move) {
         const words = `${slot === 0 ? page.text || "" : ""}${page.photos[slot].text || ""}`;
         await hold(readMs(words), true);
       }
     }
-    if (jumped()) return "jump";
     if (out) return "next";
     const goingBack = move === "back";
     move = null;
@@ -854,12 +831,11 @@ async function presentReel(page, index, fromEnd) {
       stage.classList.remove("is-in", "has-words");
       stage.classList.add("is-leaving");
       body.classList.add("is-dim");
-      if (await hold(motion(500))) return jumped() ? "jump" : move || (goingBack ? "back" : "next");
+      if (await hold(motion(500))) return move || (goingBack ? "back" : "next");
       return goingBack ? "back" : "next";
     }
     slot += goingBack ? -1 : 1;
     await glidePhoto(page, slot);
-    if (jumped()) return "jump";
   }
   return "next";
 }
@@ -903,11 +879,10 @@ async function glidePhoto(page, slot) {
 let gesture = null;
 
 function navBlocked(event) {
-  return body.classList.contains("is-editing") || event.target.closest(".candle, .editor, .edit-entry, .pace-dock, .corner, .shot, .copy");
+  return body.classList.contains("is-editing") || event.target.closest(".candle, .editor, .edit-entry, .pace-dock, .shot, .copy");
 }
 
 window.addEventListener("pointerdown", (event) => {
-  if (!out && body.classList.contains("is-finale") && body.classList.contains("is-blow-cue")) armMic();
   if (!lit || out || navBlocked(event)) return;
   gesture = { x: event.clientX, y: event.clientY, id: event.pointerId };
 });
@@ -936,16 +911,6 @@ window.addEventListener("keydown", (event) => {
   if (event.target instanceof Element && event.target.closest(".editor")) return;
   if (event.key === "ArrowRight") nudge("next");
   if (event.key === "ArrowLeft") nudge("back");
-});
-
-document.getElementById("jump-first").addEventListener("click", (event) => {
-  event.stopPropagation();
-  requestJump(0);
-});
-
-document.getElementById("jump-last").addEventListener("click", (event) => {
-  event.stopPropagation();
-  requestJump(pages.length - 1);
 });
 
 const bursts = [];
@@ -1193,6 +1158,19 @@ function burst(button) {
 let micState = "idle";
 let micStream = null;
 
+function armMicIfGranted() {
+  const permissions = navigator.permissions;
+  if (!permissions?.query) return;
+  permissions
+    .query({ name: "microphone" })
+    .then((status) => {
+      if (status.state === "granted") armMic();
+    })
+    .catch(() => {
+      /* 等他按住火苗时再问 */
+    });
+}
+
 function armMic() {
   if (micState === "on" || micState === "asking" || !navigator.mediaDevices?.getUserMedia) return;
   micState = "asking";
@@ -1208,10 +1186,9 @@ function armMic() {
         micStream = stream;
         watchBlow(stream);
       })
-      .catch((error) => {
+      .catch(() => {
         if (index + 1 < attempts.length) ask(index + 1);
-        else if (error?.name === "NotFoundError" || error?.name === "NotReadableError") micState = "denied";
-        else micState = "idle";
+        else micState = "denied";
       });
   };
   ask(0);
@@ -1250,17 +1227,14 @@ function watchBlow(stream) {
       requestAnimationFrame(watch);
       return;
     }
-    if (!body.classList.contains("is-finale")) {
-      hot = 0;
-      requestAnimationFrame(watch);
-      return;
-    }
-    const loud = rms > 0.018 && rms - ambient > 0.006 && rms > ambient * 1.2;
+    const loud = rms > 0.045 && rms - ambient > 0.02 && rms > ambient * 1.55;
     if (!loud) ambient = ambient * 0.985 + rms * 0.015;
     hot = loud ? hot + 1 : 0;
-    const lean = loud ? Math.min(1, (rms - ambient) / 0.08) : 0;
-    quench.style.setProperty("--blow", lean.toFixed(3));
-    if (hot >= 3) {
+    const opening = lit && !body.classList.contains("is-show") && !body.classList.contains("is-bridge") && !body.classList.contains("is-finale");
+    const lean = loud ? Math.min(1, (rms - ambient) / 0.16) : 0;
+    if (opening) light.style.setProperty("--blow", lean.toFixed(3));
+    if (body.classList.contains("is-finale")) quench.style.setProperty("--blow", lean.toFixed(3));
+    if (hot >= 4 && (opening || body.classList.contains("is-finale"))) {
       extinguish();
       return;
     }
@@ -1280,6 +1254,7 @@ function extinguish() {
   candle.classList.add("dying");
   if (fromOpening) candle.style.setProperty("--blow", "1");
   burst(candle);
+  swellMusic();
   startFireworks();
   micStream?.getTracks().forEach((track) => track.stop());
   window.setTimeout(() => {
@@ -1287,6 +1262,10 @@ function extinguish() {
     body.classList.add("is-finale", "is-out");
   }, 420);
 }
+
+finale.addEventListener("pointerdown", () => {
+  if (!out) armMic();
+});
 
 bindHold(light, { duration: 1100, onDone: catchFlame });
 bindHold(quench, { duration: 900, onDone: extinguish, blows: true });
@@ -1750,6 +1729,15 @@ function readEmbedded() {
   return null;
 }
 
+function albumRichness(list) {
+  if (!Array.isArray(list)) return 0;
+  return list.reduce((sum, page) => {
+    const bits = [page?.date, page?.place, page?.text];
+    (page?.photos || []).forEach((photo) => bits.push(photo?.text, photo?.src));
+    return sum + bits.filter(Boolean).join("").replace(/\s/g, "").length;
+  }, 0);
+}
+
 function applyAlbum(data) {
   pages = data.pages;
   settlePages(pages);
@@ -1769,16 +1757,27 @@ async function loadContent() {
     /* 直接打开文件时读不到旁边的 json */
   }
   if (!fileAlbum) fileAlbum = readEmbedded();
-  if (fileAlbum) {
-    applyAlbum(fileAlbum);
-    return;
-  }
   const stored = await idbGet();
   const idbAlbum = Array.isArray(stored)
     ? { pages: stored }
     : stored && Array.isArray(stored.pages)
       ? stored
       : null;
+  const fileScore = fileAlbum ? albumRichness(fileAlbum.pages) : -1;
+  const idbScore = idbAlbum ? albumRichness(idbAlbum.pages) : -1;
+  if (idbAlbum && idbScore > fileScore) {
+    applyAlbum(idbAlbum);
+    try {
+      await saveAlbum();
+    } catch {
+      pendingFileSave = true;
+    }
+    return;
+  }
+  if (fileAlbum) {
+    applyAlbum(fileAlbum);
+    return;
+  }
   if (idbAlbum) applyAlbum(idbAlbum);
 }
 

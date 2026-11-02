@@ -128,6 +128,20 @@ body.is-out .gate {
   pointer-events: none;
 }
 
+body.is-bridge .gate .f-outer,
+body.is-show .gate .f-outer,
+body.is-finale .gate .f-outer,
+body.is-out .gate .f-outer,
+body.is-bridge .gate .f-inner,
+body.is-show .gate .f-inner,
+body.is-finale .gate .f-inner,
+body.is-out .gate .f-inner,
+body.is-bridge .mini-flame,
+body.is-finale .mini-flame,
+body.is-out .mini-flame {
+  animation: none;
+}
+
 .gate {
   display: grid;
   place-items: center;
@@ -485,6 +499,7 @@ body.is-finale .stage {
   width: min(100%, calc((100svh - 190px) * 0.8));
   max-width: 100%;
   margin: 0;
+  contain: layout paint;
 }
 
 .cluster .shot {
@@ -830,6 +845,13 @@ body.is-finale .finale {
   background: #f3eadc;
   box-shadow: 0 16px 34px rgba(0, 0, 0, 0.38);
   opacity: 0;
+  contain: layout paint;
+}
+
+@media (max-width: 700px) {
+  .print {
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.28);
+  }
 }
 
 body.is-finale .print {

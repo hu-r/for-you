@@ -94,9 +94,12 @@ function placeFor(index, total) {
   return scatter(index, total);
 }
 
+let wallDirty = true;
+
 function buildWall() {
   const photos = pages.flatMap((page) => page.photos);
   wall.replaceChildren();
+  wallDirty = false;
   photos.forEach((photo, index) => {
     const print = document.createElement("figure");
     const place = placeFor(index, photos.length);
@@ -117,20 +120,49 @@ function buildWall() {
 }
 
 function wakeWall() {
+  if (wallDirty) buildWall();
   const imgs = [...wall.querySelectorAll("img[data-src]")].filter((img) => !img.getAttribute("src"));
   let index = 0;
   const step = () => {
-    imgs.slice(index, index + 3).forEach((img) => {
-      img.src = img.dataset.src;
-      bindOrientation(img, img.closest(".print"));
-    });
-    index += 3;
-    if (index < imgs.length) window.setTimeout(step, 220);
+    const img = imgs[index];
+    if (!img) return;
+    img.decoding = "async";
+    img.src = img.dataset.src;
+    bindOrientation(img, img.closest(".print"));
+    index += 1;
+    if (index < imgs.length) window.setTimeout(step, 360);
   };
   if (imgs.length) step();
 }
 
-buildWall();
+const warmed = new Map();
+
+function nextPhotos(index, slot = 0, count = 3) {
+  const srcs = [];
+  let pageIndex = index;
+  let at = slot;
+  while (srcs.length < count && pageIndex < pages.length) {
+    const photo = pages[pageIndex]?.photos?.[at];
+    if (!photo) {
+      pageIndex += 1;
+      at = 0;
+      continue;
+    }
+    if (photo.src) srcs.push(photo.src);
+    at += 1;
+  }
+  return srcs;
+}
+
+function warmPhotos(index, slot = 0, count = 3) {
+  nextPhotos(index, slot, count).forEach((src) => {
+    if (warmed.has(src)) return;
+    const img = new Image();
+    img.decoding = "async";
+    img.src = src;
+    warmed.set(src, img);
+  });
+}
 
 let lit = false;
 let out = false;
@@ -560,6 +592,7 @@ async function catchFlame() {
   body.classList.add("is-lit");
   stopPreview();
   startMusic();
+  warmPhotos(0, 0, 6);
   if (!pages.length) await ready;
   play();
 }
@@ -629,7 +662,7 @@ function bindOrientation(img, box) {
 
 function frameHtml(photo) {
   const tone = photo.src ? "has-photo" : photo.tone || "";
-  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" decoding="async" />` : "";
+  const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" decoding="async" fetchpriority="high" />` : "";
   const line = copyHtml(photo.text);
   const words = line ? `<figcaption class="copy">${line}</figcaption>` : "";
   return `<figure class="frame"><div class="shot ${tone}">${image}<span class="label">照片位</span><span class="wash"></span></div>${words}</figure>`;
@@ -840,20 +873,6 @@ function afterPaint() {
   });
 }
 
-function whenShown(root) {
-  const images = [...root.querySelectorAll(".shot.has-photo img")];
-  return Promise.all(images.map((img) => {
-    if (img.complete && img.naturalWidth) return Promise.resolve();
-    return Promise.race([
-      new Promise((resolve) => {
-        img.addEventListener("load", resolve, { once: true });
-        img.addEventListener("error", resolve, { once: true });
-      }),
-      new Promise((resolve) => window.setTimeout(resolve, 800)),
-    ]);
-  }));
-}
-
 async function present(index, fromEnd) {
   cursor = index;
   const page = pages[index];
@@ -864,6 +883,7 @@ async function present(index, fromEnd) {
 async function presentGroup(page, index) {
   move = null;
   showSlide(page, index);
+  warmPhotos(index, page.photos.length, 3);
   await afterPaint();
   if (move) return move;
   body.classList.remove("is-dim");
@@ -874,7 +894,6 @@ async function presentGroup(page, index) {
   if (move) return move;
   const words = `${page.text || ""}${page.photos.map((photo) => photo.text || "").join("")}`;
   if (await hold(readMs(words), true)) return move || "next";
-  if (!move) await whenShown(stage);
   stage.classList.remove("is-in", "has-words");
   stage.classList.add("is-leaving");
   body.classList.add("is-dim");
@@ -887,6 +906,7 @@ async function presentReel(page, index, fromEnd) {
   let slot = fromEnd ? page.photos.length - 1 : 0;
   move = null;
   showSlide(page, index, slot);
+  warmPhotos(index, slot + 1, 3);
   await afterPaint();
   body.classList.remove("is-dim");
   stage.classList.add("is-in");
@@ -903,7 +923,6 @@ async function presentReel(page, index, fromEnd) {
       }
     }
     if (out) return "next";
-    if (!move) await whenShown(stage);
     const goingBack = move === "back";
     move = null;
     const leaving = goingBack ? slot === 0 : slot === page.photos.length - 1;
@@ -943,6 +962,7 @@ async function glidePhoto(page, slot) {
     reelMark.textContent = `${slot + 1} / ${page.photos.length}`;
     skipHint.textContent = reelHint(slot, page.photos.length);
     stage.classList.add("has-words");
+    warmPhotos(cursor, slot + 1, 3);
     await afterPaint();
     frame.classList.remove("is-arrive");
     await hold(motion(500));
@@ -1008,7 +1028,8 @@ function sparkScale() {
 }
 
 function fitFireworks() {
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
+  const short = Math.min(window.innerWidth, window.innerHeight);
+  const ratio = Math.min(window.devicePixelRatio || 1, short < 760 ? 1.25 : 2);
   fireworks.width = Math.floor(window.innerWidth * ratio);
   fireworks.height = Math.floor(window.innerHeight * ratio);
   paint.setTransform(ratio, 0, 0, ratio, 0, 0);
@@ -1056,7 +1077,8 @@ function explode(rocket) {
   const reach = (portrait ? window.innerWidth * 0.38 : Math.min(window.innerWidth, window.innerHeight) * 0.24) * (rocket.style === "willow" ? 0.85 : 1);
   const tilt = (Math.random() - 0.5) * 0.12;
   const squash = 0.94 + Math.random() * 0.08;
-  const count = quietMotion ? 36 : rocket.style === "willow" ? 130 : 180;
+  const light = quietMotion || Math.min(window.innerWidth, window.innerHeight) < 760;
+  const count = light ? 42 : rocket.style === "willow" ? 90 : 110;
   flashes.push({
     x: rocket.tx,
     y: rocket.ty,
@@ -1096,7 +1118,8 @@ function drawFireworks(now) {
   paint.clearRect(0, 0, window.innerWidth, window.innerHeight);
   paint.globalCompositeOperation = "lighter";
   const gap = quietMotion ? 1500 : elapsed < 8000 ? 680 : 980;
-  if (now - lastLaunch > gap && embers.length < 2800) {
+  const emberCap = Math.min(window.innerWidth, window.innerHeight) < 760 ? 700 : 1400;
+  if (now - lastLaunch > gap && embers.length < emberCap) {
     launchRocket();
     lastLaunch = now;
   }
@@ -1141,7 +1164,7 @@ function drawFireworks(now) {
       embers.splice(index, 1);
       continue;
     }
-    if (ember.crackle && !ember.split && ember.life < 0.62 && embers.length < 3200) {
+    if (ember.crackle && !ember.split && ember.life < 0.62 && embers.length < 900) {
       ember.split = true;
       for (let child = 0; child < 4; child += 1) {
         addEmber(ember.x, ember.y, Math.random() * Math.PI * 2, sparkScale() * (1.2 + Math.random()), "#fff6df", "core");
@@ -1190,12 +1213,18 @@ function startFireworks() {
   lastLaunch = performance.now();
   fitFireworks();
   if (!quietMotion) {
-    const spots = [
-      [0.2, 0.24, "peony", 0],
-      [0.58, 0.16, "peony", 1],
-      [0.78, 0.34, "willow", 2],
-      [0.36, 0.4, "crown", 3],
-    ];
+    const light = Math.min(window.innerWidth, window.innerHeight) < 760;
+    const spots = light
+      ? [
+          [0.28, 0.26, "peony", 0],
+          [0.66, 0.32, "crown", 1],
+        ]
+      : [
+          [0.2, 0.24, "peony", 0],
+          [0.58, 0.16, "peony", 1],
+          [0.78, 0.34, "willow", 2],
+          [0.36, 0.4, "crown", 3],
+        ];
     spots.forEach(([slot, height, style, index]) => {
       explode({
         tx: window.innerWidth * (slot + (Math.random() - 0.5) * 0.06),
@@ -1205,16 +1234,18 @@ function startFireworks() {
         style,
       });
     });
-    window.setTimeout(() => {
-      if (!showFireworks) return;
-      explode({
-        tx: window.innerWidth * (0.3 + Math.random() * 0.4),
-        ty: window.innerHeight * (0.14 + Math.random() * 0.2),
-        color: palette[Math.floor(Math.random() * palette.length)],
-        accent: "#fff6df",
-        style: Math.random() < 0.5 ? "peony" : "crown",
-      });
-    }, 640);
+    if (!light) {
+      window.setTimeout(() => {
+        if (!showFireworks) return;
+        explode({
+          tx: window.innerWidth * (0.3 + Math.random() * 0.4),
+          ty: window.innerHeight * (0.14 + Math.random() * 0.2),
+          color: palette[Math.floor(Math.random() * palette.length)],
+          accent: "#fff6df",
+          style: Math.random() < 0.5 ? "peony" : "crown",
+        });
+      }, 640);
+    }
   }
   requestAnimationFrame(drawFireworks);
 }
@@ -1739,7 +1770,8 @@ function applyAlbum(data) {
   pages = data.pages;
   settlePages(pages);
   if (data.script) takeScript(data.script);
-  buildWall();
+  wallDirty = true;
+  wall.replaceChildren();
 }
 
 async function loadContent() {

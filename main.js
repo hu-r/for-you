@@ -128,7 +128,7 @@ function wakeWall() {
     if (!img) return;
     img.decoding = "async";
     img.src = img.dataset.src;
-    bindOrientation(img, img.closest(".print"));
+    revealPhoto(img, img.closest(".print"));
     index += 1;
     if (index < imgs.length) window.setTimeout(step, 360);
   };
@@ -136,6 +136,20 @@ function wakeWall() {
 }
 
 const warmed = new Map();
+const photoSize = new Map();
+
+function rememberPhotoSize(src, img) {
+  if (src && img?.naturalWidth) photoSize.set(src, { w: img.naturalWidth, h: img.naturalHeight });
+}
+
+function photoShape(src) {
+  const size = photoSize.get(src);
+  const warm = !size && src ? warmed.get(src) : null;
+  const w = size?.w || warm?.naturalWidth || 0;
+  const h = size?.h || warm?.naturalHeight || 0;
+  if (!w || !h) return "";
+  return w >= h ? "is-wide" : "is-tall";
+}
 
 function nextPhotos(index, slot = 0, count = 3) {
   const srcs = [];
@@ -161,6 +175,10 @@ function warmPhotos(index, slot = 0, count = 3) {
     img.decoding = "async";
     img.src = src;
     warmed.set(src, img);
+    const save = () => rememberPhotoSize(src, img);
+    if (img.complete) save();
+    else img.addEventListener("load", save, { once: true });
+    img.decode?.().catch(() => {});
   });
 }
 
@@ -635,37 +653,54 @@ function hold(ms, paced = false) {
 }
 
 function bindOrientation(img, box) {
-  const apply = () => {
-    if (!img.naturalWidth || !img.naturalHeight) return;
-    const ratio = img.naturalWidth / img.naturalHeight;
-    const wide = ratio > 1;
-    const target = wide ? 4 / 3 : 3 / 4;
-    img.classList.toggle("is-mat", Math.abs(ratio / target - 1) > 0.12);
-    box.classList.toggle("is-wide", wide);
-    box.classList.toggle("is-tall", !wide);
-    const shot = img.closest(".shot");
-    shot?.classList.toggle("is-wide", wide);
-    shot?.classList.toggle("is-tall", !wide);
-    const inner = img.closest(".stage-inner");
-    if (!inner) return;
-    if (inner.closest(".stage")?.classList.contains("is-reel")) {
-      inner.classList.remove("has-wide", "tall-row");
+  rememberPhotoSize(img.getAttribute("src") || img.src, img);
+  if (!img.naturalWidth || !img.naturalHeight) return;
+  const ratio = img.naturalWidth / img.naturalHeight;
+  const wide = ratio > 1;
+  const target = wide ? 4 / 3 : 3 / 4;
+  img.classList.toggle("is-mat", Math.abs(ratio / target - 1) > 0.12);
+  box.classList.toggle("is-wide", wide);
+  box.classList.toggle("is-tall", !wide);
+  const shot = img.closest(".shot");
+  shot?.classList.toggle("is-wide", wide);
+  shot?.classList.toggle("is-tall", !wide);
+  const inner = img.closest(".stage-inner");
+  if (!inner) return;
+  if (inner.closest(".stage")?.classList.contains("is-reel")) {
+    inner.classList.remove("has-wide", "tall-row");
+    return;
+  }
+  const frames = [...inner.querySelectorAll(".frame")];
+  inner.classList.toggle("has-wide", frames.some((frame) => frame.classList.contains("is-wide")));
+  inner.classList.toggle("tall-row", frames.filter((frame) => frame.classList.contains("is-tall")).length >= 2);
+}
+
+function revealPhoto(img, box) {
+  const show = () => {
+    bindOrientation(img, box);
+    img.classList.add("is-ready");
+  };
+  const wait = () => {
+    if (typeof img.decode === "function") {
+      img.decode().then(show).catch(show);
       return;
     }
-    const frames = [...inner.querySelectorAll(".frame")];
-    inner.classList.toggle("has-wide", frames.some((frame) => frame.classList.contains("is-wide")));
-    inner.classList.toggle("tall-row", frames.filter((frame) => frame.classList.contains("is-tall")).length >= 2);
+    afterPaint().then(show);
   };
-  if (img.complete) apply();
-  else img.addEventListener("load", apply, { once: true });
+  if (img.complete && img.naturalWidth) wait();
+  else {
+    img.addEventListener("load", wait, { once: true });
+    img.addEventListener("error", show, { once: true });
+  }
 }
 
 function frameHtml(photo) {
-  const tone = photo.src ? "has-photo" : photo.tone || "";
+  const shape = photo.src ? photoShape(photo.src) : "";
+  const tone = photo.src ? `has-photo ${shape}`.trim() : photo.tone || "";
   const image = photo.src ? `<img src="${escapeHtml(photo.src)}" alt="" decoding="async" fetchpriority="high" />` : "";
   const line = copyHtml(photo.text);
   const words = line ? `<figcaption class="copy">${line}</figcaption>` : "";
-  return `<figure class="frame"><div class="shot ${tone}">${image}<span class="label">照片位</span><span class="wash"></span></div>${words}</figure>`;
+  return `<figure class="frame ${shape}"><div class="shot ${tone}">${image}<span class="label">照片位</span><span class="wash"></span></div>${words}</figure>`;
 }
 
 function showSlide(page, index, slot = 0) {
@@ -681,7 +716,7 @@ function showSlide(page, index, slot = 0) {
   pageCopy.hidden = !pageLine;
   pageCopy.innerHTML = pageLine;
   cluster.querySelectorAll(".shot.has-photo img").forEach((img) => {
-    bindOrientation(img, img.closest(".frame"));
+    revealPhoto(img, img.closest(".frame"));
   });
   count.textContent = `${index + 1}/${pages.length}`;
   reelMark.hidden = !reel;
@@ -956,7 +991,7 @@ async function glidePhoto(page, slot) {
     frame.classList.add("is-arrive");
     cluster.appendChild(frame);
     frame.querySelectorAll(".shot.has-photo img").forEach((img) => {
-      bindOrientation(img, frame);
+      revealPhoto(img, frame);
     });
     reelMark.hidden = false;
     reelMark.textContent = `${slot + 1} / ${page.photos.length}`;

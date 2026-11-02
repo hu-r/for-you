@@ -874,6 +874,14 @@ body.is-out .print {
   object-fit: contain;
 }
 
+.sheet img {
+  opacity: 0;
+}
+
+.sheet img.is-ready {
+  opacity: 1;
+}
+
 .shot.has-photo {
   aspect-ratio: auto;
   width: 100%;
@@ -900,6 +908,13 @@ body.is-out .print {
   object-position: center;
   background: #f3eadc;
   box-shadow: none;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.shot.has-photo img.is-ready {
+  opacity: 1;
+  visibility: visible;
 }
 
 .frame.is-wide .shot.has-photo img {
